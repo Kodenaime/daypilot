@@ -8,12 +8,15 @@ import './utils/encryption'; // Triggers key validation on startup
 import { issueToken } from './utils/jwt'; // Triggers JWT secret check on startup
 import { authMiddleware } from './middleware/auth';
 import authRouter from './routes/auth';
+import syncRouter from './routes/sync';
+import { setupCalendarSyncJob } from './jobs/calendarSyncJob';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 app.use('/auth', authRouter); // Mount Google OAuth routes
+app.use('/sync', syncRouter); // Mount Google Calendar Sync routes
 
 const PORT = process.env.PORT || 3000;
 
@@ -75,8 +78,10 @@ async function startServer() {
     console.log('Database connected successfully.');
     try {
       await runMigrations();
+      // Initialize Background Scheduled Jobs
+      await setupCalendarSyncJob();
     } catch (err) {
-      console.error('Failed to run migrations on startup:', err);
+      console.error('Failed to initialize server dependencies or migrations:', err);
     }
   } else {
     console.error('Database connection failed after retries. Continuing server startup for health check liveness...');
