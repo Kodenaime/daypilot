@@ -2,6 +2,8 @@ import { Queue, Worker } from 'bullmq';
 import { pool } from '../config/db';
 import dotenv from 'dotenv';
 import { sendPushNotification } from '../services/fcmService';
+import { sendReminderEmail } from '../services/emailService';
+import { logNotification } from '../services/notificationLogService';
 
 dotenv.config();
 
@@ -45,9 +47,9 @@ const worker = new Worker(
 
     const client = await pool.connect();
     try {
-      // Look up reminder row, task details, and user's fcm_token
+      // Look up reminder row, task details, user's fcm_token, and email
       const reminderRes = await client.query(
-        `SELECT r.*, t.title, t.user_id, u.fcm_token 
+        `SELECT r.*, t.title, t.user_id, u.fcm_token, u.email 
          FROM reminders r 
          JOIN tasks t ON r.task_id = t.id 
          JOIN users u ON t.user_id = u.id 
@@ -77,11 +79,14 @@ const worker = new Worker(
       // Perform push dispatch checks
       if (!reminder.fcm_token) {
         console.log(`Skipping push dispatch for user ${reminder.user_id} - no FCM token registered.`);
-        await client.query(
-          `INSERT INTO notification_log (user_id, reminder_id, channel, notification_type, delivery_status, failure_reason)
-           VALUES ($1, $2, 'push', 'reminder', 'failed', 'no_fcm_token_registered')`,
-          [reminder.user_id, reminder.id]
-        );
+        await logNotification({
+          userId: reminder.user_id,
+          reminderId: reminder.id,
+          channel: 'push',
+          notificationType: 'reminder',
+          deliveryStatus: 'failed',
+          failureReason: 'no_fcm_token_registered'
+        });
       } else {
         // Construct notification message based on tier
         let body = '';
@@ -97,19 +102,35 @@ const worker = new Worker(
 
         const result = await sendPushNotification(reminder.fcm_token, title, body);
 
-        if (result.success) {
-          await client.query(
-            `INSERT INTO notification_log (user_id, reminder_id, channel, notification_type, delivery_status)
-             VALUES ($1, $2, 'push', 'reminder', 'success')`,
-            [reminder.user_id, reminder.id]
-          );
-        } else {
-          await client.query(
-            `INSERT INTO notification_log (user_id, reminder_id, channel, notification_type, delivery_status, failure_reason)
-             VALUES ($1, $2, 'push', 'reminder', 'failed', $3)`,
-            [reminder.user_id, reminder.id, result.error]
-          );
-        }
+        await logNotification({
+          userId: reminder.user_id,
+          reminderId: reminder.id,
+          channel: 'push',
+          notificationType: 'reminder',
+          deliveryStatus: result.success ? 'success' : 'failed',
+          failureReason: result.success ? null : result.error
+        });
+      }
+
+      // Perform email dispatch checks (approaching and due_now only)
+      if (reminder.tier === 'approaching' || reminder.tier === 'due_now') {
+        const subject = reminder.tier === 'approaching'
+          ? `Urgent Reminder: '${reminder.title}' is due in 1 hour`
+          : `Task Due Now: '${reminder.title}'`;
+        const emailBody = reminder.tier === 'approaching'
+          ? `Hi,\n\nThis is a reminder that your task "${reminder.title}" is due in 1 hour.\n\nBest,\nDayPilot`
+          : `Hi,\n\nYour task "${reminder.title}" is due now.\n\nBest,\nDayPilot`;
+
+        const emailResult = await sendReminderEmail(reminder.email, subject, emailBody);
+
+        await logNotification({
+          userId: reminder.user_id,
+          reminderId: reminder.id,
+          channel: 'email',
+          notificationType: 'reminder',
+          deliveryStatus: emailResult.success ? 'success' : 'failed',
+          failureReason: emailResult.success ? null : emailResult.error
+        });
       }
     } catch (err) {
       console.error(`Error processing reminder job ${job.id}:`, err);

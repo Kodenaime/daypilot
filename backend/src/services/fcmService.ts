@@ -1,6 +1,7 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import dotenv from 'dotenv';
+import { withTimeout } from '../utils/withTimeout';
 
 dotenv.config();
 
@@ -47,7 +48,12 @@ export async function sendPushNotification(
       },
       token: deviceToken
     };
-    const response = await getMessaging().send(message);
+    // Race the FCM send call against an 8-second timeout
+    const response = await withTimeout(
+      getMessaging().send(message),
+      8000,
+      'FCM request timed out'
+    );
     console.log('Successfully sent push notification via FCM:', response);
     return { success: true };
   } catch (error: any) {

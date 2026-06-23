@@ -380,8 +380,8 @@ async function runNormalTests() {
     const checkReminder11 = await dbClient.query('SELECT * FROM reminders WHERE id = $1', [reminderId11]);
     assert(checkReminder11.rows[0].status === 'sent', 'Expected reminder status to be sent');
 
-    const logCheck11 = await dbClient.query('SELECT * FROM notification_log WHERE reminder_id = $1', [reminderId11]);
-    assert(logCheck11.rows.length === 1, 'Expected 1 notification log row');
+    const logCheck11 = await dbClient.query('SELECT * FROM notification_log WHERE reminder_id = $1 AND channel = \'push\'', [reminderId11]);
+    assert(logCheck11.rows.length === 1, 'Expected 1 push notification log row');
     const log11 = logCheck11.rows[0];
     assert(log11.channel === 'push', 'Expected channel push');
     assert(log11.notification_type === 'reminder', 'Expected type reminder');
@@ -414,14 +414,77 @@ async function runNormalTests() {
     const checkReminder12 = await dbClient.query('SELECT * FROM reminders WHERE id = $1', [reminderId12]);
     assert(checkReminder12.rows[0].status === 'sent', 'Expected reminder status to be sent');
 
-    const logCheck12 = await dbClient.query('SELECT * FROM notification_log WHERE reminder_id = $1', [reminderId12]);
-    assert(logCheck12.rows.length === 1, 'Expected 1 notification log row');
+    const logCheck12 = await dbClient.query('SELECT * FROM notification_log WHERE reminder_id = $1 AND channel = \'push\'', [reminderId12]);
+    assert(logCheck12.rows.length === 1, 'Expected 1 push notification log row');
     const log12 = logCheck12.rows[0];
     assert(log12.channel === 'push', 'Expected channel push');
     assert(log12.notification_type === 'reminder', 'Expected type reminder');
     assert(log12.delivery_status === 'failed', 'Expected status failed');
     assert(log12.failure_reason === 'no_fcm_token_registered', 'Expected failure_reason no_fcm_token_registered');
-    console.log('Null Token Skip & Log PASSED.');
+    // ==========================================
+    // Test Case 13: Dual-Channel Reminder Trigger & Log (due_now)
+    // ==========================================
+    console.log('\n--- Test Case 13: Dual-Channel Reminder Trigger & Log (due_now) ---');
+    const testFcmToken13 = 'mock_fcm_token_13';
+    await dbClient.query('UPDATE users SET fcm_token = $1 WHERE id = $2', [testFcmToken13, userAId]);
+
+    const deadline3Seconds13 = new Date(Date.now() + 3 * 1000);
+    const taskRes13 = await request('POST', 'http://localhost:3000/tasks', authHeadersA, {
+      title: 'Dual Channel Test Task',
+      timezone_snapshot: 'UTC',
+      deadline_at: deadline3Seconds13.toISOString()
+    });
+    const task13 = JSON.parse(taskRes13.body);
+
+    const remindersRes13 = await dbClient.query('SELECT * FROM reminders WHERE task_id = $1 AND tier = \'due_now\'', [task13.id]);
+    assert(remindersRes13.rows.length === 1, 'Expected 1 reminder');
+    const reminderId13 = remindersRes13.rows[0].id;
+
+    console.log('Waiting 7 seconds for Dual-Channel reminder to fire...');
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+
+    const checkReminder13 = await dbClient.query('SELECT * FROM reminders WHERE id = $1', [reminderId13]);
+    assert(checkReminder13.rows[0].status === 'sent', 'Expected reminder status to be sent');
+
+    // Assert notification_log has 2 entries (one push, one email)
+    const logCheck13 = await dbClient.query('SELECT * FROM notification_log WHERE reminder_id = $1 ORDER BY channel ASC', [reminderId13]);
+    assert(logCheck13.rows.length === 2, `Expected exactly 2 notification logs, got ${logCheck13.rows.length}`);
+    
+    const [emailLog, pushLog] = logCheck13.rows;
+    assert(emailLog.channel === 'email', 'Expected email channel log');
+    assert(pushLog.channel === 'push', 'Expected push channel log');
+    assert(emailLog.delivery_status === 'failed', 'Expected email to fail gracefully (mock resend key)');
+    assert(pushLog.delivery_status === 'failed', 'Expected push to fail gracefully (mock fcm key)');
+    console.log('Dual-Channel Reminder Trigger & Log PASSED.');
+
+    // ==========================================
+    // Test Case 14: Push-Only (Advance Tier) Excludes Email
+    // ==========================================
+    console.log('\n--- Test Case 14: Push-Only (Advance Tier) Excludes Email ---');
+    // Set deadline to now + 24 hours + 3 seconds. Trigger for 'advance' tier will be now + 3 seconds.
+    const deadlineAdvance = new Date(Date.now() + (24 * 60 * 60 * 1000) + 3000);
+    const taskRes14 = await request('POST', 'http://localhost:3000/tasks', authHeadersA, {
+      title: 'Advance Tier Push Only Task',
+      timezone_snapshot: 'UTC',
+      deadline_at: deadlineAdvance.toISOString()
+    });
+    const task14 = JSON.parse(taskRes14.body);
+
+    const remindersRes14 = await dbClient.query('SELECT * FROM reminders WHERE task_id = $1 AND tier = \'advance\'', [task14.id]);
+    assert(remindersRes14.rows.length === 1, 'Expected 1 advance tier reminder');
+    const reminderId14 = remindersRes14.rows[0].id;
+
+    console.log('Waiting 5 seconds for Advance FCM reminder to fire...');
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    const checkReminder14 = await dbClient.query('SELECT * FROM reminders WHERE id = $1', [reminderId14]);
+    assert(checkReminder14.rows[0].status === 'sent', 'Expected reminder status to be sent');
+
+    // Assert notification_log has 1 entry (push) and NO email log
+    const logCheck14 = await dbClient.query('SELECT * FROM notification_log WHERE reminder_id = $1', [reminderId14]);
+    assert(logCheck14.rows.length === 1, `Expected exactly 1 notification log, got ${logCheck14.rows.length}`);
+    assert(logCheck14.rows[0].channel === 'push', 'Expected push channel only');
+    console.log('Push-Only (Advance Tier) Excludes Email PASSED.');
 
     console.log('\nALL STANDARD REMINDER AND JOB SCHEDULING TESTS PASSED!');
   } finally {
@@ -484,7 +547,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+main().then(() => {
+  console.log('Test script completed successfully. Exiting.');
+  process.exit(0);
+}).catch((err) => {
   console.error('Test run failed:', err);
   process.exit(1);
 });

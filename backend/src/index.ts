@@ -16,6 +16,7 @@ import { setupCalendarSyncJob } from './jobs/calendarSyncJob';
 import { setupInstanceGenerationJob } from './jobs/instanceGenerationJob';
 import './jobs/reminderQueue';
 import './services/fcmService';
+import './services/emailService';
 
 // Load environment variables
 dotenv.config();
