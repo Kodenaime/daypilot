@@ -14,6 +14,8 @@ import templatesRouter from './routes/templates';
 import adminRouter from './routes/admin';
 import { setupCalendarSyncJob } from './jobs/calendarSyncJob';
 import { setupInstanceGenerationJob } from './jobs/instanceGenerationJob';
+import './jobs/reminderQueue';
+import './services/fcmService';
 
 // Load environment variables
 dotenv.config();

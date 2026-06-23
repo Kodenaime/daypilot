@@ -1,5 +1,6 @@
 import { pool } from '../config/db';
 import { RecurrenceTemplate } from './templateService';
+import { createRemindersForTask } from './reminderService';
 
 export interface GenerationResult {
   templateId: string;
@@ -168,11 +169,15 @@ export async function generateInstancesForTemplate(
     }
 
     // Insert task instance
-    await pool.query(
+    const insertRes = await pool.query(
       `INSERT INTO tasks (user_id, recurrence_template_id, title, deadline_at, timezone_snapshot, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')`,
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       RETURNING *`,
       [template.user_id, template.id, template.title, deadlineAt, timezone]
     );
+
+    const insertedTask = insertRes.rows[0];
+    await createRemindersForTask(insertedTask);
 
     generatedCount++;
   }

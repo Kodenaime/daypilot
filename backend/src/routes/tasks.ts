@@ -8,6 +8,7 @@ import {
   deleteTask,
   getOverdueTasks
 } from '../services/taskService';
+import { createRemindersForTask, cancelPendingRemindersForTask } from '../services/reminderService';
 
 const router = Router();
 
@@ -57,6 +58,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
       deadline_at,
       timezone_snapshot: timezone_snapshot.trim()
     });
+    await createRemindersForTask(task);
     res.status(201).json(task);
   } catch (error) {
     console.error('Error in POST /tasks:', error);
@@ -185,11 +187,29 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
   }
 
   try {
+    const existingTask = await getTaskById(userId, taskId);
+    if (!existingTask) {
+      res.status(404).json({ error: 'Task not found or unauthorized.' });
+      return;
+    }
+
     const updatedTask = await patchTask(userId, taskId, updates);
     if (!updatedTask) {
       res.status(404).json({ error: 'Task not found or unauthorized.' });
       return;
     }
+
+    if (status === 'completed') {
+      await cancelPendingRemindersForTask(taskId);
+    } else if (deadline_at !== undefined) {
+      const oldTime = existingTask.deadline_at ? new Date(existingTask.deadline_at).getTime() : null;
+      const newTime = deadline_at ? new Date(deadline_at).getTime() : null;
+      if (oldTime !== newTime) {
+        await cancelPendingRemindersForTask(taskId);
+        await createRemindersForTask(updatedTask);
+      }
+    }
+
     res.status(200).json(updatedTask);
   } catch (error) {
     console.error(`Error in PATCH /tasks/${taskId}:`, error);
