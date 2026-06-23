@@ -9,7 +9,11 @@ import { issueToken } from './utils/jwt'; // Triggers JWT secret check on startu
 import { authMiddleware } from './middleware/auth';
 import authRouter from './routes/auth';
 import syncRouter from './routes/sync';
+import tasksRouter from './routes/tasks';
+import templatesRouter from './routes/templates';
+import adminRouter from './routes/admin';
 import { setupCalendarSyncJob } from './jobs/calendarSyncJob';
+import { setupInstanceGenerationJob } from './jobs/instanceGenerationJob';
 
 // Load environment variables
 dotenv.config();
@@ -32,6 +36,10 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 app.use(limiter);
+
+app.use('/tasks', tasksRouter); // Mount Tasks CRUD routes
+app.use('/templates', templatesRouter); // Mount Templates CRUD routes
+app.use('/admin', adminRouter); // Mount Admin routes
 
 // Liveness health check with database status
 app.get('/health', async (_req: Request, res: Response) => {
@@ -80,6 +88,7 @@ async function startServer() {
       await runMigrations();
       // Initialize Background Scheduled Jobs
       await setupCalendarSyncJob();
+      await setupInstanceGenerationJob();
     } catch (err) {
       console.error('Failed to initialize server dependencies or migrations:', err);
     }
