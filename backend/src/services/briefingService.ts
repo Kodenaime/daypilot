@@ -14,7 +14,7 @@ export function getTodayDateInTimezone(timezone: string): string {
       month: 'numeric',
       day: 'numeric'
     });
-    const formattedStr = formatter.format(now); // e.g. "6/23/2026"
+    const formattedStr = formatter.format(now);
     
     const parts = formattedStr.split('/');
     const month = String(parts[0]).padStart(2, '0');

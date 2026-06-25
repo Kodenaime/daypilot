@@ -1,15 +1,82 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import React, { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
+import { useColorScheme as useTailwindColorScheme } from 'nativewind';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NavigationContainer, NavigationIndependentTree } from '@react-navigation/native';
+import { useFonts, Inter_400Regular, Inter_700Bold } from '@expo-google-fonts/inter';
+import RootNavigator from '../navigation/RootNavigator';
+import '../global.css';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+
+const queryClient = new QueryClient();
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const systemColorScheme = useColorScheme();
+  const { setColorScheme } = useTailwindColorScheme();
+
+  // Keep Tailwind color scheme in sync with System Appearance API settings
+  useEffect(() => {
+    if (systemColorScheme === 'dark') {
+      setColorScheme('dark');
+    } else {
+      setColorScheme('light');
+    }
+  }, [systemColorScheme]);
+
+  // Load Inter fonts dynamically
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_700Bold,
+  });
+
+  // Custom navigation theme mapping the design token parameters
+  const theme = systemColorScheme === 'dark' ? {
+    dark: true,
+    colors: {
+      primary: '#3D8BFF', // Dark Mode color-primary
+      background: '#0E0E10', // Dark Mode color-background
+      card: '#1A1A1D', // Dark Mode color-surface
+      text: '#F2F2F3', // Dark Mode color-text-primary
+      border: '#2A2A2E', // Dark Mode color-border
+      notification: '#FF6433', // Dark Mode color-accent
+    },
+    fonts: {
+      regular: { fontFamily: 'Inter_400Regular', fontWeight: '400' as const },
+      medium: { fontFamily: 'Inter_400Regular', fontWeight: '500' as const },
+      bold: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const },
+      heavy: { fontFamily: 'Inter_700Bold', fontWeight: '800' as const },
+    }
+  } : {
+    dark: false,
+    colors: {
+      primary: '#0066FF', // Light Mode color-primary
+      background: '#FFFFFF', // Light Mode color-background
+      card: '#F7F8FA', // Light Mode color-surface
+      text: '#1A1A1D', // Light Mode color-text-primary
+      border: '#E5E6E8', // Light Mode color-border
+      notification: '#FF4500', // Light Mode color-accent
+    },
+    fonts: {
+      regular: { fontFamily: 'Inter_400Regular', fontWeight: '400' as const },
+      medium: { fontFamily: 'Inter_400Regular', fontWeight: '500' as const },
+      bold: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const },
+      heavy: { fontFamily: 'Inter_700Bold', fontWeight: '800' as const },
+    }
+  };
+
+  if (!fontsLoaded) {
+    return null; // Return null until fonts are successfully loaded to prevent flashes of unstyled layout
+  }
+
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <NavigationIndependentTree>
+        <NavigationContainer theme={theme}>
+          <AnimatedSplashOverlay />
+          <RootNavigator />
+        </NavigationContainer>
+      </NavigationIndependentTree>
+    </QueryClientProvider>
   );
 }

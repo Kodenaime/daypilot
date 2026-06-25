@@ -22,8 +22,9 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
 }
 
 // Redirect User to Google Consent screen
-router.get('/google', (_req: Request, res: Response) => {
+router.get('/google', (req: Request, res: Response) => {
   try {
+    const platform = req.query.platform as string;
     const authorizeUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline', // critical to receive refresh_token
       scope: [
@@ -31,7 +32,8 @@ router.get('/google', (_req: Request, res: Response) => {
         'https://www.googleapis.com/auth/userinfo.email',
         'https://www.googleapis.com/auth/userinfo.profile'
       ],
-      prompt: 'consent' // force consent screen to ensure refresh_token is returned
+      prompt: 'consent', // force consent screen to ensure refresh_token is returned
+      state: platform // Pass platform (e.g. 'mobile') in OAuth state
     });
     res.redirect(authorizeUrl);
   } catch (error) {
@@ -119,7 +121,11 @@ router.get('/google/callback', async (req: Request, res: Response): Promise<void
 
     // 5. Issue application JWT
     const jwtToken = issueToken(userId);
-    res.status(200).json({ token: jwtToken });
+    if (req.query.state === 'mobile') {
+      res.redirect(`daypilot://auth-callback?token=${encodeURIComponent(jwtToken)}`);
+    } else {
+      res.status(200).json({ token: jwtToken });
+    }
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('OAuth callback processing failed:', error);
