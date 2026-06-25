@@ -14,6 +14,7 @@ import templatesRouter from './routes/templates';
 import adminRouter from './routes/admin';
 import { setupCalendarSyncJob } from './jobs/calendarSyncJob';
 import { setupInstanceGenerationJob } from './jobs/instanceGenerationJob';
+import { setupBriefingJob } from './jobs/briefingJob';
 import './jobs/reminderQueue';
 import './services/fcmService';
 import './services/emailService';
@@ -22,6 +23,7 @@ import './services/emailService';
 dotenv.config();
 
 const app = express();
+app.use(express.json());
 app.use('/auth', authRouter); // Mount Google OAuth routes
 app.use('/sync', syncRouter); // Mount Google Calendar Sync routes
 
@@ -29,7 +31,6 @@ const PORT = process.env.PORT || 3000;
 
 // Security Middlewares
 app.use(helmet());
-app.use(express.json());
 
 // Basic Rate Limiting
 const limiter = rateLimit({
@@ -92,6 +93,7 @@ async function startServer() {
       // Initialize Background Scheduled Jobs
       await setupCalendarSyncJob();
       await setupInstanceGenerationJob();
+      await setupBriefingJob();
     } catch (err) {
       console.error('Failed to initialize server dependencies or migrations:', err);
     }
