@@ -12,6 +12,7 @@ import syncRouter from './routes/sync';
 import tasksRouter from './routes/tasks';
 import templatesRouter from './routes/templates';
 import adminRouter from './routes/admin';
+import usersRouter from './routes/users';
 import { setupCalendarSyncJob } from './jobs/calendarSyncJob';
 import { setupInstanceGenerationJob } from './jobs/instanceGenerationJob';
 import { setupBriefingJob } from './jobs/briefingJob';
@@ -44,6 +45,7 @@ app.use(limiter);
 app.use('/tasks', tasksRouter); // Mount Tasks CRUD routes
 app.use('/templates', templatesRouter); // Mount Templates CRUD routes
 app.use('/admin', adminRouter); // Mount Admin routes
+app.use('/users', usersRouter); // Mount Users routes
 
 // Liveness health check with database status
 app.get('/health', async (_req: Request, res: Response) => {

@@ -73,12 +73,20 @@ export async function runBriefingPipeline(
   const retryDelayMs = options?.retryDelayMs ?? 60000;
 
   // 1. Fetch user's details (device_timezone, email, fcm_token)
-  const userRes = await pool.query('SELECT email, device_timezone, fcm_token FROM users WHERE id = $1', [userId]);
+  // 1. Fetch user's details (device_timezone, email, fcm_token, preferences)
+  const userRes = await pool.query(
+    'SELECT email, device_timezone, fcm_token, briefing_enabled, push_enabled, email_enabled FROM users WHERE id = $1',
+    [userId]
+  );
   if (userRes.rowCount === 0) {
     console.error(`runBriefingPipeline: User ${userId} not found.`);
     return { outcome: 'fallback' };
   }
   const user = userRes.rows[0];
+  if (!user.briefing_enabled) {
+    console.log(`[Briefing Orchestrator] Daily briefing is disabled for user ${userId}. Aborting pipeline.`);
+    return { outcome: 'fallback' };
+  }
   const deviceTimezone = user.device_timezone || 'UTC';
   const email = user.email;
   const fcmToken = user.fcm_token;
@@ -174,7 +182,16 @@ export async function runBriefingPipeline(
   console.log(`[Briefing Orchestrator] Dispatching briefing (${outcome}) to user ${userId} via Push & Email...`);
 
   // Dispatch Push
-  if (!fcmToken) {
+  if (!user.push_enabled) {
+    console.log(`[Briefing Orchestrator] Skipping push dispatch for user ${userId} - push notifications disabled in settings.`);
+    await logNotification({
+      userId,
+      channel: 'push',
+      notificationType,
+      deliveryStatus: 'failed',
+      failureReason: 'push_disabled_by_user'
+    });
+  } else if (!fcmToken) {
     console.log(`[Briefing Orchestrator] Skipping push dispatch for user ${userId} - no FCM token registered.`);
     await logNotification({
       userId,
@@ -195,7 +212,16 @@ export async function runBriefingPipeline(
   }
 
   // Dispatch Email
-  if (!email) {
+  if (!user.email_enabled) {
+    console.log(`[Briefing Orchestrator] Skipping email dispatch for user ${userId} - email notifications disabled in settings.`);
+    await logNotification({
+      userId,
+      channel: 'email',
+      notificationType,
+      deliveryStatus: 'failed',
+      failureReason: 'email_disabled_by_user'
+    });
+  } else if (!email) {
     console.log(`[Briefing Orchestrator] Skipping email dispatch for user ${userId} - no email registered.`);
     await logNotification({
       userId,

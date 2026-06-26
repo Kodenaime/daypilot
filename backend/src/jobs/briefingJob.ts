@@ -85,11 +85,15 @@ const worker = new Worker(
       const now = new Date();
 
       try {
-        const usersRes = await pool.query('SELECT id, device_timezone FROM users');
+        const usersRes = await pool.query('SELECT id, device_timezone, briefing_enabled FROM users');
         const users = usersRes.rows;
 
         for (const user of users) {
           const userId = user.id;
+          if (!user.briefing_enabled) {
+            console.log(`[Briefing Scheduler Job] Daily briefing is disabled for user ${userId}. Skipping.`);
+            continue;
+          }
           const timezone = user.device_timezone || 'UTC';
 
           const { matches, localDateStr } = isBriefingTriggerTime(timezone, now);

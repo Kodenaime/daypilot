@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { useColorScheme, DeviceEventEmitter } from 'react-native';
 import { useColorScheme as useTailwindColorScheme } from 'nativewind';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationContainer, NavigationIndependentTree } from '@react-navigation/native';
 import { useFonts, Inter_400Regular, Inter_700Bold } from '@expo-google-fonts/inter';
+import * as SecureStore from 'expo-secure-store';
 import RootNavigator from '../navigation/RootNavigator';
 import '../global.css';
 
@@ -14,15 +15,28 @@ const queryClient = new QueryClient();
 export default function TabLayout() {
   const systemColorScheme = useColorScheme();
   const { setColorScheme } = useTailwindColorScheme();
+  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
 
-  // Keep Tailwind color scheme in sync with System Appearance API settings
+  // Load theme preference on mount and listen to changes
   useEffect(() => {
-    if (systemColorScheme === 'dark') {
-      setColorScheme('dark');
-    } else {
-      setColorScheme('light');
-    }
-  }, [systemColorScheme]);
+    SecureStore.getItemAsync('theme_preference').then((val) => {
+      if (val === 'light' || val === 'dark' || val === 'system') {
+        setThemePreference(val);
+      }
+    });
+
+    const sub = DeviceEventEmitter.addListener('THEME_PREFERENCE_CHANGED', (newPref) => {
+      setThemePreference(newPref);
+    });
+    return () => sub.remove();
+  }, []);
+
+  const activeColorScheme = themePreference === 'system' ? systemColorScheme : themePreference;
+
+  // Keep Tailwind color scheme in sync with override or system
+  useEffect(() => {
+    setColorScheme(activeColorScheme === 'dark' ? 'dark' : 'light');
+  }, [activeColorScheme]);
 
   // Load Inter fonts dynamically
   const [fontsLoaded] = useFonts({
@@ -31,7 +45,7 @@ export default function TabLayout() {
   });
 
   // Custom navigation theme mapping the design token parameters
-  const theme = systemColorScheme === 'dark' ? {
+  const theme = activeColorScheme === 'dark' ? {
     dark: true,
     colors: {
       primary: '#3D8BFF', // Dark Mode color-primary

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Button, ActivityIndicator, DeviceEventEmitter, FlatList, TextInput, TouchableOpacity, Alert, ScrollView, Platform } from 'react-native';
+import { View, Button, ActivityIndicator, DeviceEventEmitter, FlatList, TextInput, TouchableOpacity, Alert, ScrollView, Platform, Switch } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as SecureStore from 'expo-secure-store';
@@ -14,6 +14,9 @@ import { TaskCard } from '../components/TaskCard';
 import { useTaskDetail, useUpdateTask, useDeleteTask } from '../hooks/useTaskDetail';
 import { useCreateTask } from '../hooks/useCreateTask';
 import { useCreateTemplate } from '../hooks/useCreateTemplate';
+import { useTemplates, useTemplateDetail, useUpdateTemplate, useDeactivateTemplate } from '../hooks/useTemplates';
+import { useOverdueTasks } from '../hooks/useOverdueTasks';
+import { useUserProfile, useUpdateUserProfile } from '../hooks/useUserProfile';
 
 // ----------------------------------------------------
 // Placeholder Screens
@@ -41,7 +44,7 @@ function SplashScreen({ navigation }: any) {
         </View>
         
         <View className="items-center mt-md">
-          <DisplayText className="text-text-primary-light dark:text-text-primary-dark font-extrabold text-center tracking-widest">
+          <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-center tracking-widest">
             DayPilot
           </DisplayText>
           <CaptionText className="text-text-secondary-light dark:text-text-secondary-dark text-center mt-xs">
@@ -125,7 +128,7 @@ function GoogleSignInScreen({ navigation, route }: any) {
         </View>
         
         <View className="items-center mt-sm">
-          <HeadingText className="text-text-primary-light dark:text-text-primary-dark font-bold text-center">
+          <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold text-center">
             Sign In with Google
           </HeadingText>
           <CaptionText className="text-center mt-xs px-md">
@@ -164,6 +167,9 @@ function CalendarPermissionScreen({ navigation, route }: any) {
 // Today Tab Stack Screens
 function TodayScreen({ navigation }: any) {
   const { data: tasks, isLoading, error } = useTodayTasks();
+  const { data: overdueTasks } = useOverdueTasks();
+
+  const overdueCount = overdueTasks?.length || 0;
 
   const sortedTasks = [...(tasks || [])].sort((a, b) => {
     const timeA = a.deadline_at ? new Date(a.deadline_at).getTime() : 0;
@@ -184,7 +190,7 @@ function TodayScreen({ navigation }: any) {
         <CaptionText className="text-primary-light dark:text-primary-dark font-bold uppercase tracking-wider">
           {todayDateString}
         </CaptionText>
-        <DisplayText className="text-text-primary-light dark:text-text-primary-dark font-extrabold text-3xl">
+        <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-3xl">
           Today
         </DisplayText>
         
@@ -193,6 +199,24 @@ function TodayScreen({ navigation }: any) {
           ⚠️ Calendar sync may take a few minutes to reflect changes made directly in Google Calendar.
         </CaptionText>
       </View>
+
+      {/* Overdue Badge / Indicator */}
+      {overdueCount > 0 && (
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('OverdueList')}
+          className="bg-accent-light/10 border border-accent-light/30 p-sm rounded-xl mb-md flex-row justify-between items-center"
+        >
+          <View className="flex-row items-center gap-xs">
+            <CaptionText className="text-accent-light dark:text-accent-dark font-bold text-sm">
+              ⚠️ {overdueCount} Overdue Task{overdueCount > 1 ? 's' : ''}
+            </CaptionText>
+          </View>
+          <CaptionText className="text-accent-light dark:text-accent-dark font-bold text-xs">
+            View All →
+          </CaptionText>
+        </TouchableOpacity>
+      )}
 
       {isLoading ? (
         <View className="flex-1 justify-center items-center">
@@ -217,7 +241,7 @@ function TodayScreen({ navigation }: any) {
             </View>
           </View>
           <View className="items-center gap-xs">
-            <HeadingText className="text-text-primary-light dark:text-text-primary-dark font-bold text-center">
+            <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold text-center">
               All caught up!
             </HeadingText>
             <CaptionText className="text-center px-lg">
@@ -418,7 +442,7 @@ function TaskDetailScreen({ route, navigation }: any) {
           editable={!isGoogleTask}
           value={title}
           onChangeText={setTitle}
-          className={`border border-border-light dark:border-border-dark p-md rounded-2xl text-text-primary-light dark:text-text-primary-dark text-base ${
+          className={`border border-border-light dark:border-border-dark p-md rounded-2xl text-textPrimary-light dark:text-textPrimary-dark text-base ${
             isGoogleTask ? 'bg-surface-light dark:bg-surface-dark opacity-70' : 'bg-card-light dark:bg-card-dark'
           }`}
         />
@@ -430,7 +454,7 @@ function TaskDetailScreen({ route, navigation }: any) {
           Deadline
         </CaptionText>
         <View className="border border-border-light dark:border-border-dark p-md rounded-2xl bg-card-light dark:bg-card-dark flex-row items-center justify-between">
-          <BodyText className="text-text-primary-light dark:text-text-primary-dark font-medium">
+          <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-medium">
             {deadline ? deadline.toLocaleString(undefined, {
               dateStyle: 'medium',
               timeStyle: 'short'
@@ -490,7 +514,7 @@ function TaskDetailScreen({ route, navigation }: any) {
           {updateMutation.isPending ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <BodyText className={`font-bold ${isCompleted ? 'text-text-primary-light dark:text-text-primary-dark' : 'text-white'}`}>
+            <BodyText className={`font-bold ${isCompleted ? 'text-textPrimary-light dark:text-textPrimary-dark' : 'text-white'}`}>
               {isCompleted ? '↩️ Mark Incomplete' : '✅ Mark Complete'}
             </BodyText>
           )}
@@ -605,7 +629,7 @@ function CreateTaskScreen({ navigation }: any) {
           placeholderTextColor="#999"
           value={title}
           onChangeText={setTitle}
-          className="border border-border-light dark:border-border-dark p-md rounded-2xl text-text-primary-light dark:text-text-primary-dark text-base bg-card-light dark:bg-card-dark"
+          className="border border-border-light dark:border-border-dark p-md rounded-2xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-card-light dark:bg-card-dark"
         />
       </View>
 
@@ -615,7 +639,7 @@ function CreateTaskScreen({ navigation }: any) {
           Deadline (Optional)
         </CaptionText>
         <View className="border border-border-light dark:border-border-dark p-md rounded-2xl bg-card-light dark:bg-card-dark flex-row items-center justify-between">
-          <BodyText className="text-text-primary-light dark:text-text-primary-dark font-medium">
+          <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-medium">
             {deadline ? deadline.toLocaleString(undefined, {
               dateStyle: 'medium',
               timeStyle: 'short'
@@ -692,22 +716,161 @@ function CreateTaskScreen({ navigation }: any) {
 }
 
 function OverdueListScreen({ navigation }: any) {
+  const { data: overdueTasks, isLoading, error } = useOverdueTasks();
+
+  const sortedOverdue = [...(overdueTasks || [])].sort((a, b) => {
+    const timeA = a.deadline_at ? new Date(a.deadline_at).getTime() : 0;
+    const timeB = b.deadline_at ? new Date(b.deadline_at).getTime() : 0;
+    return timeA - timeB; // Oldest first
+  });
+
   return (
-    <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark p-md gap-md">
-      {/* Accent color token used specifically for overdue urgency indicators */}
-      <HeadingText className="text-accent-light dark:text-accent-dark">Overdue Tasks View</HeadingText>
-      <Button title="Go Back" onPress={() => navigation.goBack()} />
+    <View className="flex-1 bg-background-light dark:bg-background-dark px-md pt-lg">
+      {/* Header Row */}
+      <View className="flex-row justify-between items-center mb-lg">
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <CaptionText className="text-primary-light dark:text-primary-dark font-semibold text-base">
+            ← Back
+          </CaptionText>
+        </TouchableOpacity>
+        <HeadingText className="font-bold text-accent-light dark:text-accent-dark">⚠️ All Overdue Tasks</HeadingText>
+        <View className="w-10" />
+      </View>
+
+      {isLoading ? (
+        <View className="flex-1 justify-center items-center">
+          <ActivityIndicator size="small" color="#FF4500" />
+        </View>
+      ) : error ? (
+        <View className="flex-1 justify-center items-center gap-sm">
+          <BodyText className="text-accent-light font-semibold">Failed to load overdue tasks</BodyText>
+        </View>
+      ) : sortedOverdue.length === 0 ? (
+        <View className="flex-1 justify-center items-center p-lg gap-sm">
+          <DisplayText className="text-success-light text-center text-4xl">🎉</DisplayText>
+          <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold text-center mt-sm">No Overdue Tasks!</HeadingText>
+          <CaptionText className="text-center">You are completely up to date.</CaptionText>
+        </View>
+      ) : (
+        <FlatList
+          data={sortedOverdue}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TaskCard
+              task={item}
+              onPress={() => navigation.navigate('TaskDetail', { taskId: item.id })}
+            />
+          )}
+          ItemSeparatorComponent={() => <View className="h-4" />}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </View>
   );
 }
 
+function getOrdinalSuffix(day: number) {
+  if (day > 3 && day < 21) return 'th';
+  switch (day % 10) {
+    case 1:  return "st";
+    case 2:  return "nd";
+    case 3:  return "rd";
+    default: return "th";
+  }
+}
+
+function getFriendlyRecurrence(template: any) {
+  const time = template.time_of_day ? template.time_of_day.slice(0, 5) : '';
+  const displayTime = time ? ` at ${time}` : '';
+  
+  switch (template.recurrence_type) {
+    case 'daily':
+      return `Daily${displayTime}`;
+    case 'weekly':
+      const days = template.days_of_week || [];
+      const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const dayNames = days.map((d: number) => weekdays[d]).join(', ');
+      return `Weekly on ${dayNames}${displayTime}`;
+    case 'monthly':
+      return `Monthly on the ${template.day_of_month}${getOrdinalSuffix(template.day_of_month)}${displayTime}`;
+    case 'custom_interval':
+      return `Every ${template.interval_days} day${template.interval_days > 1 ? 's' : ''}${displayTime}`;
+    default:
+      return '';
+  }
+}
+
 // Templates Tab Stack Screens
 function TemplatesScreen({ navigation }: any) {
+  const { data: templates, isLoading, error } = useTemplates();
+
+  const sortedTemplates = [...(templates || [])].sort((a, b) => {
+    if (a.is_active === b.is_active) {
+      return a.title.localeCompare(b.title);
+    }
+    return a.is_active ? -1 : 1; // Active first
+  });
+
   return (
-    <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark p-md gap-md">
-      <HeadingText>Recurrence Templates View</HeadingText>
-      <BodyText className="text-center">Manage your repeating tasks</BodyText>
-      <Button title="Create Template" onPress={() => navigation.navigate('CreateTemplate')} />
+    <View className="flex-1 bg-background-light dark:bg-background-dark px-md pt-lg">
+      <View className="mb-md flex-row justify-between items-center">
+        <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-3xl">
+          Templates
+        </DisplayText>
+      </View>
+
+      {isLoading ? (
+        <View className="flex-1 justify-center items-center">
+          <ActivityIndicator size="small" color="#0066FF" />
+        </View>
+      ) : error ? (
+        <View className="flex-1 justify-center items-center gap-sm">
+          <BodyText className="text-accent-light font-semibold">Failed to load templates</BodyText>
+        </View>
+      ) : sortedTemplates.length === 0 ? (
+        <View className="flex-1 justify-center items-center p-lg gap-md">
+          <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold text-center">
+            No templates yet
+          </HeadingText>
+          <CaptionText className="text-center px-lg">
+            Create recurring templates to automate daily, weekly, or custom repeating tasks.
+          </CaptionText>
+        </View>
+      ) : (
+        <FlatList
+          data={sortedTemplates}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('EditTemplate', { templateId: item.id })}
+              className={`p-md rounded-2xl border ${
+                item.is_active
+                  ? 'bg-card-light dark:bg-card-dark border-border-light dark:border-border-dark'
+                  : 'bg-surface-light dark:bg-surface-dark border-border-light dark:border-border-dark opacity-60'
+              }`}
+            >
+              <View className="flex-row justify-between items-start mb-xs">
+                <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold flex-1 mr-sm text-base">
+                  {item.title}
+                </HeadingText>
+                <View className={`px-sm py-xs rounded-full ${item.is_active ? 'bg-success-light/10' : 'bg-red-500/10'}`}>
+                  <CaptionText className={`font-bold text-[10px] ${item.is_active ? 'text-success-light dark:text-success-dark' : 'text-red-500'}`}>
+                    {item.is_active ? 'ACTIVE' : 'INACTIVE'}
+                  </CaptionText>
+                </View>
+              </View>
+              <BodyText className="text-textSecondary-light dark:text-textSecondary-dark text-sm mt-xs">
+                🔁 {getFriendlyRecurrence(item)}
+              </BodyText>
+            </TouchableOpacity>
+          )}
+          ItemSeparatorComponent={() => <View className="h-4" />}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       {/* Floating Action Button (FAB) for creating templates */}
       <TouchableOpacity
@@ -731,14 +894,156 @@ function TemplatesScreen({ navigation }: any) {
 // Settings Tab Screen
 function SettingsScreen({ route }: any) {
   const { setAuth } = route.params || {};
+  const { data: profile, isLoading, error } = useUserProfile();
+  const updateMutation = useUpdateUserProfile();
+  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
+
+  useEffect(() => {
+    SecureStore.getItemAsync('theme_preference').then((val) => {
+      if (val === 'light' || val === 'dark' || val === 'system') {
+        setThemePreference(val);
+      }
+    });
+  }, []);
+
+  const handleThemeChange = async (pref: 'light' | 'dark' | 'system') => {
+    setThemePreference(pref);
+    await SecureStore.setItemAsync('theme_preference', pref);
+    DeviceEventEmitter.emit('THEME_PREFERENCE_CHANGED', pref);
+  };
+
+  const handleToggle = (key: 'briefing_enabled' | 'push_enabled' | 'email_enabled', value: boolean) => {
+    updateMutation.mutate({ [key]: value }, {
+      onError: (err) => {
+        Alert.alert('Error', err.message || 'Failed to update preferences');
+      }
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark">
+        <ActivityIndicator size="small" color="#0066FF" />
+      </View>
+    );
+  }
+
+  const syncStatusText = profile?.sync_status === 'healthy' ? 'Connected' : 'Reconnection needed';
+  const syncStatusColor = profile?.sync_status === 'healthy' ? 'text-success-light dark:text-success-dark' : 'text-accent-light dark:text-accent-dark';
+
   return (
-    <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark p-md gap-md">
-      <HeadingText>Settings View</HeadingText>
-      <Button title="Log Out" color="red" onPress={async () => {
-        await SecureStore.deleteItemAsync('user_jwt_token');
-        setAuth?.(false);
-      }} />
-    </View>
+    <ScrollView className="flex-1 bg-background-light dark:bg-background-dark px-md pt-lg">
+      <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-3xl mb-lg">
+        Settings
+      </DisplayText>
+
+      {/* Account Section */}
+      <View className="mb-lg">
+        <HeadingText className="mb-xs font-bold text-textSecondary-light dark:text-textSecondary-dark text-sm uppercase tracking-wider">
+          Account
+        </HeadingText>
+        <View className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-md rounded-2xl gap-sm">
+          <View className="flex-row justify-between items-center">
+            <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Email</BodyText>
+            <BodyText className="text-textSecondary-light dark:text-textSecondary-dark">{profile?.email}</BodyText>
+          </View>
+          <View className="flex-row justify-between items-center border-t border-border-light dark:border-border-dark pt-sm">
+            <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Google Calendar</BodyText>
+            <BodyText className={`font-bold ${syncStatusColor}`}>{syncStatusText}</BodyText>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={async () => {
+              await SecureStore.deleteItemAsync('user_jwt_token');
+              setAuth?.(false);
+            }}
+            className="mt-sm bg-red-500/10 p-sm rounded-xl items-center"
+          >
+            <CaptionText className="text-red-500 font-bold text-sm">
+              🚪 Log Out
+            </CaptionText>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Notifications Section */}
+      <View className="mb-lg">
+        <HeadingText className="mb-xs font-bold text-textSecondary-light dark:text-textSecondary-dark text-sm uppercase tracking-wider">
+          Notifications
+        </HeadingText>
+        <View className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-md rounded-2xl gap-md">
+          <View className="flex-row justify-between items-center">
+            <View className="flex-1 mr-sm">
+              <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Daily Briefing</BodyText>
+              <CaptionText className="text-xs leading-4">Receive a summary of today's schedule at 5:55 AM local time.</CaptionText>
+            </View>
+            <Switch
+              value={profile?.briefing_enabled}
+              onValueChange={(val) => handleToggle('briefing_enabled', val)}
+              trackColor={{ false: '#767577', true: '#0066FF' }}
+              thumbColor={Platform.OS === 'ios' ? undefined : '#f4f3f4'}
+            />
+          </View>
+
+          <View className="flex-row justify-between items-center border-t border-border-light dark:border-border-dark pt-md">
+            <View className="flex-1 mr-sm">
+              <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Push Notifications</BodyText>
+              <CaptionText className="text-xs leading-4">Receive dynamic alerts on this device for upcoming deadlines.</CaptionText>
+            </View>
+            <Switch
+              value={profile?.push_enabled}
+              onValueChange={(val) => handleToggle('push_enabled', val)}
+              trackColor={{ false: '#767577', true: '#0066FF' }}
+              thumbColor={Platform.OS === 'ios' ? undefined : '#f4f3f4'}
+            />
+          </View>
+
+          <View className="flex-row justify-between items-center border-t border-border-light dark:border-border-dark pt-md">
+            <View className="flex-1 mr-sm">
+              <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Email Alerts</BodyText>
+              <CaptionText className="text-xs leading-4">Receive warning reminders to your connected Google email address.</CaptionText>
+            </View>
+            <Switch
+              value={profile?.email_enabled}
+              onValueChange={(val) => handleToggle('email_enabled', val)}
+              trackColor={{ false: '#767577', true: '#0066FF' }}
+              thumbColor={Platform.OS === 'ios' ? undefined : '#f4f3f4'}
+            />
+          </View>
+        </View>
+      </View>
+
+      {/* Appearance Section */}
+      <View className="mb-xl">
+        <HeadingText className="mb-xs font-bold text-textSecondary-light dark:text-textSecondary-dark text-sm uppercase tracking-wider">
+          Appearance
+        </HeadingText>
+        <View className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-md rounded-2xl">
+          <View className="flex-row gap-xs">
+            {(['light', 'dark', 'system'] as const).map((pref) => {
+              const isSelected = themePreference === pref;
+              const label = pref.charAt(0).toUpperCase() + pref.slice(1);
+              return (
+                <TouchableOpacity
+                  key={pref}
+                  activeOpacity={0.8}
+                  onPress={() => handleThemeChange(pref)}
+                  className={`flex-1 py-sm rounded-xl border items-center justify-center ${
+                    isSelected
+                      ? 'bg-primary-light dark:bg-primary-dark border-primary-light dark:border-primary-dark'
+                      : 'border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark'
+                  }`}
+                >
+                  <CaptionText className={`font-bold ${isSelected ? 'text-white' : 'text-text-secondary-light dark:text-text-secondary-dark'}`}>
+                    {label}
+                  </CaptionText>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -855,7 +1160,7 @@ function CreateTemplateScreen({ navigation }: any) {
           placeholderTextColor="#999"
           value={title}
           onChangeText={setTitle}
-          className="border border-border-light dark:border-border-dark p-md rounded-2xl text-text-primary-light dark:text-text-primary-dark text-base bg-card-light dark:bg-card-dark"
+          className="border border-border-light dark:border-border-dark p-md rounded-2xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-card-light dark:bg-card-dark"
         />
       </View>
 
@@ -906,7 +1211,7 @@ function CreateTemplateScreen({ navigation }: any) {
                     isSelected ? 'bg-primary-light dark:bg-primary-dark' : 'bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark'
                   }`}
                 >
-                  <BodyText className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-text-primary-light dark:text-text-primary-dark'}`}>
+                  <BodyText className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-textPrimary-light dark:text-textPrimary-dark'}`}>
                     {day}
                   </BodyText>
                 </TouchableOpacity>
@@ -928,7 +1233,7 @@ function CreateTemplateScreen({ navigation }: any) {
               placeholderTextColor="#999"
               value={dayOfMonth}
               onChangeText={setDayOfMonth}
-              className="border border-border-light dark:border-border-dark p-sm rounded-xl text-text-primary-light dark:text-text-primary-dark text-base bg-surface-light dark:bg-surface-dark"
+              className="border border-border-light dark:border-border-dark p-sm rounded-xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-surface-light dark:bg-surface-dark"
             />
           </View>
           <CaptionText className="text-text-secondary-light dark:text-text-secondary-dark text-xs italic leading-4">
@@ -948,7 +1253,7 @@ function CreateTemplateScreen({ navigation }: any) {
             placeholderTextColor="#999"
             value={intervalDays}
             onChangeText={setIntervalDays}
-            className="border border-border-light dark:border-border-dark p-sm rounded-xl text-text-primary-light dark:text-text-primary-dark text-base bg-surface-light dark:bg-surface-dark"
+            className="border border-border-light dark:border-border-dark p-sm rounded-xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-surface-light dark:bg-surface-dark"
           />
         </View>
       )}
@@ -959,7 +1264,7 @@ function CreateTemplateScreen({ navigation }: any) {
           Time of Day
         </CaptionText>
         <View className="border border-border-light dark:border-border-dark p-md rounded-2xl bg-card-light dark:bg-card-dark flex-row items-center justify-between">
-          <BodyText className="text-text-primary-light dark:text-text-primary-dark font-medium">
+          <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-medium">
             {timeOfDay.toLocaleTimeString(undefined, {
               hour: '2-digit',
               minute: '2-digit',
@@ -1014,6 +1319,311 @@ function CreateTemplateScreen({ navigation }: any) {
   );
 }
 
+function EditTemplateScreen({ route, navigation }: any) {
+  const { templateId } = route.params || {};
+  const { data: template, isLoading } = useTemplateDetail(templateId);
+  const updateMutation = useUpdateTemplate(templateId);
+  const deactivateMutation = useDeactivateTemplate(templateId);
+
+  const [title, setTitle] = useState('');
+  const [timeOfDay, setTimeOfDay] = useState<Date>(new Date());
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([]);
+  const [dayOfMonth, setDayOfMonth] = useState('1');
+  const [intervalDays, setIntervalDays] = useState('1');
+
+  useEffect(() => {
+    if (template) {
+      setTitle(template.title);
+      if (template.time_of_day) {
+        const [h, m] = template.time_of_day.split(':');
+        const d = new Date();
+        d.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
+        setTimeOfDay(d);
+      }
+      if (template.days_of_week) {
+        setDaysOfWeek(template.days_of_week);
+      }
+      if (template.day_of_month) {
+        setDayOfMonth(String(template.day_of_month));
+      }
+      if (template.interval_days) {
+        setIntervalDays(String(template.interval_days));
+      }
+    }
+  }, [template]);
+
+  const handleTimeChange = (_event: any, selectedTime?: Date) => {
+    setShowTimePicker(false);
+    if (selectedTime) {
+      setTimeOfDay(selectedTime);
+    }
+  };
+
+  const toggleDayOfWeek = (day: number) => {
+    if (daysOfWeek.includes(day)) {
+      setDaysOfWeek(daysOfWeek.filter((d) => d !== day));
+    } else {
+      setDaysOfWeek([...daysOfWeek, day].sort());
+    }
+  };
+
+  const handleSave = () => {
+    if (!title.trim()) {
+      Alert.alert('Validation Error', 'Title is required.');
+      return;
+    }
+
+    const hours = String(timeOfDay.getHours()).padStart(2, '0');
+    const minutes = String(timeOfDay.getMinutes()).padStart(2, '0');
+    const timeStr = `${hours}:${minutes}`;
+
+    const payload: any = {
+      title: title.trim(),
+      time_of_day: timeStr,
+    };
+
+    if (template?.recurrence_type === 'weekly') {
+      if (daysOfWeek.length === 0) {
+        Alert.alert('Validation Error', 'Please select at least one day of the week.');
+        return;
+      }
+      payload.days_of_week = daysOfWeek;
+    } else if (template?.recurrence_type === 'monthly') {
+      const dom = parseInt(dayOfMonth, 10);
+      if (isNaN(dom) || dom < 1 || dom > 31) {
+        Alert.alert('Validation Error', 'Day of month must be a number between 1 and 31.');
+        return;
+      }
+      payload.day_of_month = dom;
+    } else if (template?.recurrence_type === 'custom_interval') {
+      const val = parseInt(intervalDays, 10);
+      if (isNaN(val) || val <= 0) {
+        Alert.alert('Validation Error', 'Interval days must be a positive integer.');
+        return;
+      }
+      payload.interval_days = val;
+    }
+
+    updateMutation.mutate(payload, {
+      onSuccess: () => {
+        Alert.alert('Success', 'Template updated successfully.');
+        navigation.goBack();
+      },
+      onError: (err) => {
+        Alert.alert('Error', err.message || 'Failed to update template');
+      }
+    });
+  };
+
+  const handleDeactivate = () => {
+    Alert.alert(
+      'Deactivate Template',
+      'Are you sure you want to deactivate this recurrence template? This will stop future task instances from being generated.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Deactivate',
+          style: 'destructive',
+          onPress: () => {
+            deactivateMutation.mutate(undefined, {
+              onSuccess: () => {
+                Alert.alert('Success', 'Template deactivated.');
+                navigation.goBack();
+              },
+              onError: (err) => {
+                Alert.alert('Error', err.message || 'Failed to deactivate template');
+              }
+            });
+          }
+        }
+      ]
+    );
+  };
+
+  if (isLoading || !template) {
+    return (
+      <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark">
+        <ActivityIndicator size="small" color="#0066FF" />
+      </View>
+    );
+  }
+
+  const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+  return (
+    <ScrollView className="flex-1 bg-background-light dark:bg-background-dark px-md pt-lg">
+      <View className="flex-row justify-between items-center mb-lg">
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <CaptionText className="text-primary-light dark:text-primary-dark font-semibold text-base">
+            ← Cancel
+          </CaptionText>
+        </TouchableOpacity>
+        <HeadingText className="font-bold">Edit Template</HeadingText>
+        <View className="w-10" />
+      </View>
+
+      {/* Info Badge */}
+      <View className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-sm rounded-xl mb-md flex-row items-center justify-between">
+        <CaptionText className="font-semibold text-xs text-text-secondary-light dark:text-text-secondary-dark uppercase tracking-wider">
+          Type: {template.recurrence_type}
+        </CaptionText>
+        <View className={`px-sm py-xs rounded-full ${template.is_active ? 'bg-success-light/10' : 'bg-red-500/10'}`}>
+          <CaptionText className={`font-bold text-xs ${template.is_active ? 'text-success-light dark:text-success-dark' : 'text-red-500'}`}>
+            {template.is_active ? '● Active' : '● Inactive'}
+          </CaptionText>
+        </View>
+      </View>
+
+      {/* Input Group: Title */}
+      <View className="mb-md">
+        <CaptionText className="mb-xs font-bold text-text-secondary-light dark:text-text-secondary-dark">
+          Template Title
+        </CaptionText>
+        <TextInput
+          editable={template.is_active}
+          value={title}
+          onChangeText={setTitle}
+          className="border border-border-light dark:border-border-dark p-md rounded-2xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-card-light dark:bg-card-dark"
+        />
+      </View>
+
+      {/* Conditional Fields depending on type */}
+      {template.recurrence_type === 'weekly' && (
+        <View className="mb-md bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-md rounded-2xl">
+          <CaptionText className="mb-xs font-bold text-text-secondary-light dark:text-text-secondary-dark">
+            Select Days of Week
+          </CaptionText>
+          <View className="flex-row justify-between mt-xs">
+            {weekdays.map((day, index) => {
+              const isSelected = daysOfWeek.includes(index);
+              return (
+                <TouchableOpacity
+                  key={index}
+                  disabled={!template.is_active}
+                  activeOpacity={0.7}
+                  onPress={() => toggleDayOfWeek(index)}
+                  className={`w-10 h-10 rounded-full items-center justify-center ${
+                    isSelected ? 'bg-primary-light dark:bg-primary-dark' : 'bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark'
+                  }`}
+                >
+                  <BodyText className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-textPrimary-light dark:text-textPrimary-dark'}`}>
+                    {day}
+                  </BodyText>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
+      {template.recurrence_type === 'monthly' && (
+        <View className="mb-md bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-md rounded-2xl gap-sm">
+          <View>
+            <CaptionText className="mb-xs font-bold text-text-secondary-light dark:text-text-secondary-dark">
+              Day of Month (1 - 31)
+            </CaptionText>
+            <TextInput
+              editable={template.is_active}
+              keyboardType="number-pad"
+              value={dayOfMonth}
+              onChangeText={setDayOfMonth}
+              className="border border-border-light dark:border-border-dark p-sm rounded-xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-surface-light dark:bg-surface-dark"
+            />
+          </View>
+          <CaptionText className="text-text-secondary-light dark:text-text-secondary-dark text-xs italic leading-4">
+            ℹ️ If the selected day doesn't exist in a month, the template generator will automatically skip that month.
+          </CaptionText>
+        </View>
+      )}
+
+      {template.recurrence_type === 'custom_interval' && (
+        <View className="mb-md bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-md rounded-2xl">
+          <CaptionText className="mb-xs font-bold text-text-secondary-light dark:text-text-secondary-dark">
+            Interval (Every N Days)
+          </CaptionText>
+          <TextInput
+            editable={template.is_active}
+            keyboardType="number-pad"
+            value={intervalDays}
+            onChangeText={setIntervalDays}
+            className="border border-border-light dark:border-border-dark p-sm rounded-xl text-textPrimary-light dark:text-textPrimary-dark text-base bg-surface-light dark:bg-surface-dark"
+          />
+        </View>
+      )}
+
+      {/* Time of Day */}
+      <View className="mb-lg">
+        <CaptionText className="mb-xs font-bold text-text-secondary-light dark:text-text-secondary-dark">
+          Time of Day
+        </CaptionText>
+        <View className="border border-border-light dark:border-border-dark p-md rounded-2xl bg-card-light dark:bg-card-dark flex-row items-center justify-between">
+          <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-medium">
+            {timeOfDay.toLocaleTimeString(undefined, {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </BodyText>
+          <TouchableOpacity
+            disabled={!template.is_active}
+            onPress={() => setShowTimePicker(true)}
+            className="bg-primary-light/10 px-sm py-xs rounded-lg"
+          >
+            <CaptionText className="text-primary-light dark:text-primary-dark font-bold text-xs">
+              Set Time
+            </CaptionText>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {showTimePicker && (
+        <DateTimePicker
+          value={timeOfDay}
+          mode="time"
+          display="default"
+          onChange={handleTimeChange}
+        />
+      )}
+
+      <View className="gap-md mt-md mb-xl">
+        {template.is_active && (
+          <>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={handleSave}
+              disabled={updateMutation.isPending}
+              className="bg-primary-light dark:bg-primary-dark p-md rounded-2xl justify-center items-center"
+            >
+              {updateMutation.isPending ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <BodyText className="text-white font-bold">
+                  💾 Save Changes
+                </BodyText>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={handleDeactivate}
+              disabled={deactivateMutation.isPending}
+              className="border border-red-500/30 p-md rounded-2xl justify-center items-center"
+            >
+              {deactivateMutation.isPending ? (
+                <ActivityIndicator size="small" color="red" />
+              ) : (
+                <BodyText className="text-red-500 font-bold">
+                  🚫 Deactivate Template
+                </BodyText>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
 // ----------------------------------------------------
 // Navigation Containers
 // ----------------------------------------------------
@@ -1055,6 +1665,7 @@ function TemplatesTabStack() {
     <Stack.Navigator>
       <Stack.Screen name="TemplatesMain" component={TemplatesScreen} options={{ title: 'Templates' }} />
       <Stack.Screen name="CreateTemplate" component={CreateTemplateScreen} options={{ title: 'New Template' }} />
+      <Stack.Screen name="EditTemplate" component={EditTemplateScreen} options={{ title: 'Edit Template' }} />
     </Stack.Navigator>
   );
 }
@@ -1117,7 +1728,7 @@ export default function RootNavigator() {
             </View>
           </View>
           <View className="items-center mt-md">
-            <DisplayText className="text-text-primary-light dark:text-text-primary-dark font-extrabold text-center tracking-widest">
+            <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-center tracking-widest">
               DayPilot
             </DisplayText>
             <CaptionText className="text-text-secondary-light dark:text-text-secondary-dark text-center mt-xs">
