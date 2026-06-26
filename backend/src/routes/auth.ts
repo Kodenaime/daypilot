@@ -25,6 +25,12 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
 router.get('/google', (req: Request, res: Response) => {
   try {
     const platform = req.query.platform as string;
+    const redirectUri = req.query.redirect_uri as string;
+
+    // Serialize platform and dynamic redirect URI as base64 state parameter
+    const stateObj = { platform, redirect_uri: redirectUri };
+    const state = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
     const authorizeUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline', // critical to receive refresh_token
       scope: [
@@ -33,7 +39,7 @@ router.get('/google', (req: Request, res: Response) => {
         'https://www.googleapis.com/auth/userinfo.profile'
       ],
       prompt: 'consent', // force consent screen to ensure refresh_token is returned
-      state: platform // Pass platform (e.g. 'mobile') in OAuth state
+      state // Pass serialized state object to Google
     });
     res.redirect(authorizeUrl);
   } catch (error) {
@@ -44,7 +50,7 @@ router.get('/google', (req: Request, res: Response) => {
 
 // OAuth Callback handler
 router.get('/google/callback', async (req: Request, res: Response): Promise<void> => {
-  const { code } = req.query;
+  const { code, state } = req.query;
 
   if (!code) {
     res.status(400).json({ error: 'Bad Request: Authorization code is missing.' });
@@ -121,8 +127,23 @@ router.get('/google/callback', async (req: Request, res: Response): Promise<void
 
     // 5. Issue application JWT
     const jwtToken = issueToken(userId);
-    if (req.query.state === 'mobile') {
-      res.redirect(`daypilot://auth-callback?token=${encodeURIComponent(jwtToken)}`);
+    
+    let platform = '';
+    let mobileRedirectUri = '';
+    if (state) {
+      try {
+        const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+        platform = decoded.platform;
+        mobileRedirectUri = decoded.redirect_uri;
+      } catch (err) {
+        console.error('Failed to parse OAuth state:', err);
+      }
+    }
+
+    if (platform === 'mobile') {
+      const finalRedirect = mobileRedirectUri || 'daypilot://auth-callback';
+      const separator = finalRedirect.includes('?') ? '&' : '?';
+      res.redirect(`${finalRedirect}${separator}token=${encodeURIComponent(jwtToken)}`);
     } else {
       res.status(200).json({ token: jwtToken });
     }

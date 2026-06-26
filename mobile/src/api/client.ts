@@ -1,11 +1,7 @@
 import { Platform, DeviceEventEmitter } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
-export const BASE_URL = Platform.select({
-  android: 'http://10.0.2.2:3000',
-  ios: 'http://localhost:3000',
-  default: 'http://localhost:3000',
-});
+export const BASE_URL = 'https://cardigan-crunching-reclaim.ngrok-free.dev';
 
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<any> {
   const url = `${BASE_URL}${path}`;
@@ -27,6 +23,7 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
       ...authHeaders,
       ...options.headers,
     },
