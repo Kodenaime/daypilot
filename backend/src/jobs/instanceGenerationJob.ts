@@ -1,6 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import { runInstanceGenerationForAllActiveTemplates } from '../services/instanceGenerationService';
 import dotenv from 'dotenv';
+import { logInfo, logWarn, logError } from '../utils/logger';
 
 dotenv.config();
 
@@ -18,7 +19,7 @@ try {
     password = decodeURIComponent(parsed.password);
   }
 } catch (e) {
-  console.warn('Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
+  logWarn('jobs', 'Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
 }
 
 const connection = {
@@ -37,12 +38,14 @@ const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
     if (job.name === 'generate-instances-daily') {
-      console.log('Daily instance generation job started...');
+      logInfo('jobs', 'Daily instance generation job started...');
       try {
         const results = await runInstanceGenerationForAllActiveTemplates();
-        console.log(`Daily instance generation job completed. Templates processed: ${results.length}`);
+        logInfo('jobs', `Daily instance generation job completed. Templates processed: ${results.length}`, { count: results.length });
       } catch (err) {
-        console.error('Error running daily instance generation job:', err);
+        logError('jobs', 'Error running daily instance generation job', {
+          error: err instanceof Error ? err.message : String(err)
+        });
         throw err;
       }
     }
@@ -51,7 +54,9 @@ const worker = new Worker(
 );
 
 worker.on('error', (err) => {
-  console.error('Instance generation worker crashed:', err);
+  logError('jobs', 'Instance generation worker crashed', {
+    error: err instanceof Error ? err.message : String(err)
+  });
 });
 
 /**
@@ -75,8 +80,10 @@ export async function setupInstanceGenerationJob(): Promise<void> {
         }
       }
     );
-    console.log('Repeatable daily instance generation job successfully scheduled (0 0 * * *).');
+    logInfo('jobs', 'Repeatable daily instance generation job successfully scheduled (0 0 * * *).');
   } catch (error) {
-    console.error('Failed to schedule repeatable daily instance generation job:', error);
+    logError('jobs', 'Failed to schedule repeatable daily instance generation job', {
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 }

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { sendPushNotification } from '../services/fcmService';
 import { sendReminderEmail } from '../services/emailService';
 import { logNotification } from '../services/notificationLogService';
+import { logInfo, logWarn, logError } from '../utils/logger';
 
 dotenv.config();
 
@@ -21,7 +22,7 @@ try {
     password = decodeURIComponent(parsed.password);
   }
 } catch (e) {
-  console.warn('Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
+  logWarn('jobs', 'Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
 }
 
 const connection = {
@@ -41,7 +42,7 @@ const worker = new Worker(
   async (job) => {
     const { reminderId } = job.data;
     if (!reminderId) {
-      console.warn(`Job ${job.id} fired with no reminderId.`);
+      logWarn('jobs', `Job ${job.id} fired with no reminderId.`, { jobId: job.id });
       return;
     }
 
@@ -54,11 +55,11 @@ const worker = new Worker(
          JOIN tasks t ON r.task_id = t.id 
          JOIN users u ON t.user_id = u.id 
          WHERE r.id = $1`,
-        [reminderId]
+         [reminderId]
       );
 
       if (reminderRes.rows.length === 0) {
-        console.warn(`Reminder ${reminderId} not found in database.`);
+        logWarn('jobs', `Reminder ${reminderId} not found in database.`, { reminderId });
         return;
       }
 
@@ -66,7 +67,7 @@ const worker = new Worker(
 
       // If reminder's status is no longer 'scheduled', exit cleanly.
       if (reminder.status !== 'scheduled') {
-        console.log(`Reminder ${reminderId} is not status "scheduled" (current status: ${reminder.status}). Exiting cleanly.`);
+        logInfo('jobs', `Reminder ${reminderId} is not status "scheduled" (current status: ${reminder.status}). Exiting cleanly.`, { reminderId, status: reminder.status });
         return;
       }
 
@@ -78,7 +79,7 @@ const worker = new Worker(
 
       // Perform push dispatch checks
       if (!reminder.push_enabled) {
-        console.log(`Skipping push dispatch for user ${reminder.user_id} - push notifications disabled in settings.`);
+        logInfo('jobs', `Skipping push dispatch for user ${reminder.user_id} - push notifications disabled in settings.`, { userId: reminder.user_id, reminderId: reminder.id });
         await logNotification({
           userId: reminder.user_id,
           reminderId: reminder.id,
@@ -88,7 +89,7 @@ const worker = new Worker(
           failureReason: 'push_disabled_by_user'
         });
       } else if (!reminder.fcm_token) {
-        console.log(`Skipping push dispatch for user ${reminder.user_id} - no FCM token registered.`);
+        logInfo('jobs', `Skipping push dispatch for user ${reminder.user_id} - no FCM token registered.`, { userId: reminder.user_id, reminderId: reminder.id });
         await logNotification({
           userId: reminder.user_id,
           reminderId: reminder.id,
@@ -125,7 +126,7 @@ const worker = new Worker(
       // Perform email dispatch checks (approaching and due_now only)
       if (reminder.tier === 'approaching' || reminder.tier === 'due_now') {
         if (!reminder.email_enabled) {
-          console.log(`Skipping email dispatch for user ${reminder.user_id} - email notifications disabled in settings.`);
+          logInfo('jobs', `Skipping email dispatch for user ${reminder.user_id} - email notifications disabled in settings.`, { userId: reminder.user_id, reminderId: reminder.id });
           await logNotification({
             userId: reminder.user_id,
             reminderId: reminder.id,
@@ -155,7 +156,11 @@ const worker = new Worker(
         }
       }
     } catch (err) {
-      console.error(`Error processing reminder job ${job.id}:`, err);
+      logError('jobs', `Error processing reminder job ${job.id}`, {
+        jobId: job.id,
+        reminderId,
+        error: err instanceof Error ? err.message : String(err)
+      });
       throw err;
     } finally {
       client.release();
@@ -165,5 +170,7 @@ const worker = new Worker(
 );
 
 worker.on('error', (err) => {
-  console.error('Reminders worker crashed:', err);
+  logError('jobs', 'Reminders worker crashed', {
+    error: err instanceof Error ? err.message : String(err)
+  });
 });

@@ -1,6 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import { pool } from '../config/db';
 import { encrypt, decrypt } from '../utils/encryption';
+import { logInfo, logWarn, logError } from '../utils/logger';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -41,7 +42,7 @@ export async function getAuthenticatedCalendarClient(userId: string): Promise<OA
   // If token is expired or expiring in under 1 minute, refresh it manually
   const isExpired = new Date(token_expires_at).getTime() - Date.now() < 60 * 1000;
   if (isExpired) {
-    console.log(`OAuth token expired or expiring soon for user ${userId}. Refreshing access token...`);
+    logInfo('sync', `OAuth token expired or expiring soon for user ${userId}. Refreshing access token...`, { userId });
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
       oauth2Client.setCredentials(credentials);
@@ -58,7 +59,7 @@ export async function getAuthenticatedCalendarClient(userId: string): Promise<OA
           userId
         ]
       );
-      console.log(`OAuth access token successfully refreshed and encrypted in DB for user ${userId}.`);
+      logInfo('sync', `OAuth access token successfully refreshed and encrypted in DB for user ${userId}.`, { userId });
     } catch (err) {
       // Set sync_status to token_expired on refresh failure
       await pool.query(
@@ -84,34 +85,33 @@ interface CalendarEvent {
 }
 
 interface CalendarListResponse {
+  items: CalendarEvent[];
   nextPageToken?: string;
   nextSyncToken?: string;
-  items?: CalendarEvent[];
 }
 
 /**
- * Performs a one-time full historical and forward calendar sync.
- * Fetches all events to capture nextSyncToken but filters out tasks older than 1 year.
+ * Performs initial sync: downloads all events from 1 year ago to future.
+ * Saves cursor synchronization token in google_accounts.
  */
 export async function performInitialSync(userId: string): Promise<{ importedCount: number }> {
+  const oauth2Client = await getAuthenticatedCalendarClient(userId);
+
+  // Retrieve user's timezone settings
+  const userRes = await pool.query('SELECT device_timezone FROM users WHERE id = $1', [userId]);
+  const userTimezone = userRes.rows[0]?.device_timezone || 'UTC';
+
+  let importedCount = 0;
+  let nextPageToken: string | undefined = undefined;
+  let syncToken: string | undefined = undefined;
+
   try {
-    const oauth2Client = await getAuthenticatedCalendarClient(userId);
-
-    // Retrieve user's timezone settings as fallback
-    const userRes = await pool.query('SELECT device_timezone FROM users WHERE id = $1', [userId]);
-    const userTimezone = userRes.rows[0]?.device_timezone || 'UTC';
-
-    let importedCount = 0;
-    let nextPageToken: string | undefined = undefined;
-    let syncToken: string | undefined = undefined;
-
-    // We filter history on the application layer: events older than 1 year are skipped.
-    // This allows us to query Google WITHOUT timeMin/timeMax filters, which is REQUIRED
+    // We only import events starting from 1 year ago. This is a heuristic decision
     // by Google Calendar API to receive a "nextSyncToken" for future incremental syncs.
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-    console.log(`Starting initial sync for user ${userId}. Skipping tasks prior to ${oneYearAgo.toISOString()}.`);
+    logInfo('sync', `Starting initial sync for user ${userId}. Skipping tasks prior to ${oneYearAgo.toISOString()}.`, { userId });
 
     do {
       const params: Record<string, string | boolean> = {
@@ -172,17 +172,20 @@ export async function performInitialSync(userId: string): Promise<{ importedCoun
          WHERE user_id = $2`,
         [syncToken, userId]
       );
-      console.log(`Initial sync complete for user ${userId}. nextSyncToken saved.`);
+      logInfo('sync', `Initial sync complete for user ${userId}. nextSyncToken saved.`, { userId });
     }
 
     return { importedCount };
   } catch (error) {
     const statusCode = (error as any).status || (error as any).code || (error as any).response?.status;
     if (statusCode === 429 || statusCode === 403) {
-      console.warn(`Quota limit exceeded (HTTP ${statusCode}) during initial sync for user ${userId}. Skipping.`);
+      logWarn('sync', `Quota limit exceeded (HTTP ${statusCode}) during initial sync for user ${userId}. Skipping.`, { userId, statusCode });
       throw error;
     }
-    console.error(`Initial sync failure for user ${userId}:`, error);
+    logError('sync', `Initial sync failure for user ${userId}`, {
+      userId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     await pool.query(
       "UPDATE google_accounts SET sync_status = 'sync_error' WHERE user_id = $1",
       [userId]
@@ -193,9 +196,6 @@ export async function performInitialSync(userId: string): Promise<{ importedCoun
 
 const BACKOFF_DELAY_MS = process.env.NODE_ENV === 'test' ? 50 : 30000;
 
-/**
- * Helper to make Calendar API requests with a simple exponential backoff for quota errors.
- */
 async function fetchEventsWithBackoff(
   oauth2Client: OAuth2Client,
   params: Record<string, string | boolean>,
@@ -209,7 +209,7 @@ async function fetchEventsWithBackoff(
   } catch (err) {
     const statusCode = (err as any).status || (err as any).code || (err as any).response?.status;
     if (statusCode === 429 || statusCode === 403) {
-      console.warn(`Google Calendar API quota limit hit (HTTP ${statusCode}) for user ${userId}. Retrying in ${BACKOFF_DELAY_MS}ms...`);
+      logWarn('sync', `Google Calendar API quota limit hit (HTTP ${statusCode}) for user ${userId}. Retrying in ${BACKOFF_DELAY_MS}ms...`, { userId, statusCode });
       await new Promise((resolve) => setTimeout(resolve, BACKOFF_DELAY_MS));
       // Retry once
       return await oauth2Client.request<CalendarListResponse>({
@@ -223,7 +223,7 @@ async function fetchEventsWithBackoff(
 
 /**
  * Performs incremental sync using the stored nextSyncToken cursor.
- * Fetches and applies changed/deleted events since the last sync.
+ * Saves/modifies tasks based on changes since the last sync.
  */
 export async function performIncrementalSync(
   userId: string
@@ -249,7 +249,7 @@ export async function performIncrementalSync(
   let nextPageToken: string | undefined = undefined;
   let newSyncToken: string | undefined = undefined;
 
-  console.log(`Starting incremental sync for user ${userId} with syncToken: ${storedSyncToken}`);
+  logInfo('sync', `Starting incremental sync for user ${userId} with syncToken: ${storedSyncToken}`, { userId, storedSyncToken });
 
   try {
     do {
@@ -316,7 +316,7 @@ export async function performIncrementalSync(
          WHERE user_id = $2`,
         [newSyncToken, userId]
       );
-      console.log(`Incremental sync complete. nextSyncToken updated and sync_status marked healthy.`);
+      logInfo('sync', `Incremental sync complete. nextSyncToken updated and sync_status marked healthy.`, { userId });
     }
 
     return { upsertedCount, deletedCount };
@@ -325,19 +325,22 @@ export async function performIncrementalSync(
 
     // HTTP 410 Gone indicates syncToken has expired/invalidated
     if (statusCode === 410) {
-      console.log(`syncToken expired (410) for user ${userId}. Resetting token and executing full initial sync resync...`);
+      logInfo('sync', `syncToken expired (410) for user ${userId}. Resetting token and executing full initial sync resync...`, { userId });
       await pool.query('UPDATE google_accounts SET sync_token = NULL WHERE user_id = $1', [userId]);
       const resync = await performInitialSync(userId);
       return { upsertedCount: resync.importedCount, deletedCount: 0 };
     }
 
     if (statusCode === 429 || statusCode === 403) {
-      console.warn(`Quota limit exceeded (HTTP ${statusCode}) twice for user ${userId}. Skipping this run.`);
+      logWarn('sync', `Quota limit exceeded (HTTP ${statusCode}) twice for user ${userId}. Skipping this run.`, { userId, statusCode });
       throw error;
     }
 
     // Unexpected sync failure: Mark sync_status as sync_error
-    console.error(`Incremental sync failure for user ${userId}:`, error);
+    logError('sync', `Incremental sync failure for user ${userId}`, {
+      userId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     await pool.query(
       "UPDATE google_accounts SET sync_status = 'sync_error' WHERE user_id = $1",
       [userId]
@@ -345,4 +348,3 @@ export async function performIncrementalSync(
     throw error;
   }
 }
-

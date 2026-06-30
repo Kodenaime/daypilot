@@ -2,6 +2,7 @@ import { initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import dotenv from 'dotenv';
 import { withTimeout } from '../utils/withTimeout';
+import { logInfo, logWarn, logError } from '../utils/logger';
 
 dotenv.config();
 
@@ -24,10 +25,12 @@ try {
   initializeApp({
     credential: cert(serviceAccount)
   });
-  console.log('Firebase Admin SDK initialized successfully for FCM.');
+  logInfo('fcm', 'Firebase Admin SDK initialized successfully for FCM.');
   isFirebaseInitialized = true;
 } catch (error: any) {
-  console.warn(`WARNING: Firebase Admin SDK initialization failed: ${error.message}. Push notifications will fail to deliver.`);
+  logWarn('fcm', `WARNING: Firebase Admin SDK initialization failed: ${error.message}. Push notifications will fail to deliver.`, {
+    error: error.message
+  });
 }
 
 export async function sendPushNotification(
@@ -36,7 +39,7 @@ export async function sendPushNotification(
   body: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!isFirebaseInitialized) {
-    console.error('FCM push notification send failed: Firebase Admin SDK is not initialized.');
+    logError('fcm', 'FCM push notification send failed: Firebase Admin SDK is not initialized.');
     return { success: false, error: 'Firebase Admin SDK is not initialized.' };
   }
 
@@ -54,10 +57,12 @@ export async function sendPushNotification(
       8000,
       'FCM request timed out'
     );
-    console.log('Successfully sent push notification via FCM:', response);
+    logInfo('fcm', 'Successfully sent push notification via FCM', { response });
     return { success: true };
   } catch (error: any) {
-    console.error('FCM push notification send failed:', error);
+    logError('fcm', 'FCM push notification send failed', {
+      error: error.message || String(error)
+    });
     return { success: false, error: error.message || String(error) };
   }
 }

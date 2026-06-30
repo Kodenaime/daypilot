@@ -6,9 +6,10 @@ import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import messaging from '@react-native-firebase/messaging';
 
 import { DisplayText, HeadingText, BodyText, CaptionText } from '../components/Typography';
-import { BASE_URL } from '../api/client';
+import { BASE_URL, apiFetch } from '../api/client';
 import { useTodayTasks, Task } from '../hooks/useTodayTasks';
 import { TaskCard } from '../components/TaskCard';
 import { useTaskDetail, useUpdateTask, useDeleteTask } from '../hooks/useTaskDetail';
@@ -1715,6 +1716,65 @@ export default function RootNavigator() {
       subscription.remove();
     };
   }, []);
+
+  // FCM Token Refresh & Sync logic
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isMounted = true;
+    let unsubscribeRefresh: (() => void) | undefined;
+
+    async function syncFCMToken(token: string) {
+      try {
+        console.log('[FCM Sync] Syncing FCM token with backend:', token);
+        await apiFetch('/users/me/fcm-token', {
+          method: 'PATCH',
+          body: JSON.stringify({ fcmToken: token }),
+        });
+        console.log('[FCM Sync] FCM token successfully synced.');
+      } catch (err) {
+        console.error('[FCM Sync] Failed to sync FCM token to backend:', err);
+      }
+    }
+
+    async function setupFCM() {
+      try {
+        // Request Permission (standard FCM client setup)
+        const authStatus = await messaging().requestPermission();
+        const enabled =
+          authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+          authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+        if (enabled) {
+          // Get current token (runs on every app launch when session is valid)
+          const token = await messaging().getToken();
+          if (token && isMounted) {
+            await syncFCMToken(token);
+          }
+
+          // Register token refresh listener
+          unsubscribeRefresh = messaging().onTokenRefresh(async (newToken: string) => {
+            if (isMounted) {
+              await syncFCMToken(newToken);
+            }
+          });
+        } else {
+          console.log('[FCM Setup] FCM notification permissions denied.');
+        }
+      } catch (err) {
+        console.error('[FCM Setup] Error setting up FCM messaging:', err);
+      }
+    }
+
+    setupFCM();
+
+    return () => {
+      isMounted = false;
+      if (unsubscribeRefresh) {
+        unsubscribeRefresh();
+      }
+    };
+  }, [isAuthenticated]);
 
   if (isLoading) {
     // Elegant loading splash state

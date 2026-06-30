@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { pool } from '../config/db';
 import { performIncrementalSync } from '../services/googleCalendar';
 import dotenv from 'dotenv';
+import { logInfo, logWarn, logError } from '../utils/logger';
 
 dotenv.config();
 
@@ -20,7 +21,7 @@ try {
     password = decodeURIComponent(parsed.password);
   }
 } catch (e) {
-  console.warn('Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
+  logWarn('jobs', 'Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
 }
 
 const connection = {
@@ -39,7 +40,7 @@ const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
     if (job.name === 'sync-all-users') {
-      console.log('Calendar sync job started...');
+      logInfo('jobs', 'Calendar sync job started...');
       
       let processedCount = 0;
       let errorCount = 0;
@@ -52,30 +53,42 @@ const worker = new Worker(
         for (const account of accounts) {
           const userId = account.user_id;
           try {
-            console.log(`Job processing: incremental sync for user ${userId}`);
+            logInfo('jobs', `Job processing: incremental sync for user ${userId}`, { userId });
             const result = await performIncrementalSync(userId);
-            console.log(
-              `User ${userId} sync complete. Upserted: ${result.upsertedCount}, Deleted: ${result.deletedCount}`
-            );
+            logInfo('jobs', `User ${userId} sync complete. Upserted: ${result.upsertedCount}, Deleted: ${result.deletedCount}`, {
+              userId,
+              upsertedCount: result.upsertedCount,
+              deletedCount: result.deletedCount
+            });
             processedCount++;
           } catch (err) {
-            console.error(`Error processing sync for user ${userId}:`, err);
+            logError('jobs', `Error processing sync for user ${userId}`, {
+              userId,
+              error: err instanceof Error ? err.message : String(err)
+            });
             errorCount++;
           }
         }
       } catch (dbErr) {
-        console.error('Database query failed in calendar sync job worker:', dbErr);
+        logError('jobs', 'Database query failed in calendar sync job worker', {
+          error: dbErr instanceof Error ? dbErr.message : String(dbErr)
+        });
         throw dbErr;
       }
 
-      console.log(`Calendar sync job completed: ${processedCount} user(s) processed, ${errorCount} error(s)`);
+      logInfo('jobs', `Calendar sync job completed: ${processedCount} user(s) processed, ${errorCount} error(s)`, {
+        processedCount,
+        errorCount
+      });
     }
   },
   { connection }
 );
 
 worker.on('error', (err) => {
-  console.error('Calendar sync worker crashed:', err);
+  logError('jobs', 'Calendar sync worker crashed', {
+    error: err instanceof Error ? err.message : String(err)
+  });
 });
 
 /**
@@ -99,8 +112,10 @@ export async function setupCalendarSyncJob(): Promise<void> {
         }
       }
     );
-    console.log('Repeatable calendar sync job successfully scheduled to run every 5 minutes.');
+    logInfo('jobs', 'Repeatable calendar sync job successfully scheduled to run every 5 minutes.');
   } catch (error) {
-    console.error('Failed to schedule repeatable calendar sync job:', error);
+    logError('jobs', 'Failed to schedule repeatable calendar sync job', {
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 }

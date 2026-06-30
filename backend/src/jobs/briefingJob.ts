@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { pool } from '../config/db';
 import { runBriefingPipeline } from '../services/briefingOrchestrator';
 import dotenv from 'dotenv';
+import { logInfo, logWarn, logError } from '../utils/logger';
 
 dotenv.config();
 
@@ -20,7 +21,7 @@ try {
     password = decodeURIComponent(parsed.password);
   }
 } catch (e) {
-  console.warn('Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
+  logWarn('jobs', 'Failed to parse REDIS_URL, falling back to localhost:6379 defaults');
 }
 
 const connection = {
@@ -71,7 +72,10 @@ export function isBriefingTriggerTime(timezone: string, now: Date): { matches: b
     const matches = hour === 5 && minute >= 55 && minute <= 59;
     return { matches, localDateStr };
   } catch (error) {
-    console.warn(`Timezone lookup failed for briefing trigger calculation: "${timezone}"`, error);
+    logWarn('jobs', `Timezone lookup failed for briefing trigger calculation: "${timezone}"`, {
+      timezone,
+      error: error instanceof Error ? error.message : String(error)
+    });
     return { matches: false, localDateStr: '' };
   }
 }
@@ -81,7 +85,7 @@ const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
     if (job.name === 'check-and-trigger-briefings') {
-      console.log('[Briefing Scheduler Job] Checking for user daily briefings to trigger...');
+      logInfo('jobs', '[Briefing Scheduler Job] Checking for user daily briefings to trigger...');
       const now = new Date();
 
       try {
@@ -91,7 +95,7 @@ const worker = new Worker(
         for (const user of users) {
           const userId = user.id;
           if (!user.briefing_enabled) {
-            console.log(`[Briefing Scheduler Job] Daily briefing is disabled for user ${userId}. Skipping.`);
+            logInfo('jobs', `[Briefing Scheduler Job] Daily briefing is disabled for user ${userId}. Skipping.`, { userId });
             continue;
           }
           const timezone = user.device_timezone || 'UTC';
@@ -103,22 +107,27 @@ const worker = new Worker(
             // Check if briefing was already triggered for this user on this local day
             const alreadySent = await redisClient.get(safeguardKey);
             if (alreadySent) {
-              console.log(`[Briefing Scheduler Job] Briefing already triggered today for user ${userId} (${localDateStr}). Skipping.`);
+              logInfo('jobs', `[Briefing Scheduler Job] Briefing already triggered today for user ${userId} (${localDateStr}). Skipping.`, { userId, localDateStr });
               continue;
             }
 
             // Set the safeguard key with an 24 hour expiry to prevent double trigger
             await redisClient.set(safeguardKey, '1', 'EX', 24 * 60 * 60);
 
-            console.log(`[Briefing Scheduler Job] Local time is 5:55 AM (or within 5:55-5:59 AM range) in timezone "${timezone}" for user ${userId}. Triggering pipeline...`);
+            logInfo('jobs', `[Briefing Scheduler Job] Local time is 5:55 AM (or within 5:55-5:59 AM range) in timezone "${timezone}" for user ${userId}. Triggering pipeline...`, { userId, timezone });
             // Run briefing pipeline in background context safely
             runBriefingPipeline(userId).catch((err) => {
-              console.error(`[Briefing Scheduler Job] Error running briefing pipeline for user ${userId}:`, err);
+              logError('jobs', `[Briefing Scheduler Job] Error running briefing pipeline for user ${userId}`, {
+                userId,
+                error: err instanceof Error ? err.message : String(err)
+              });
             });
           }
         }
       } catch (err) {
-        console.error('[Briefing Scheduler Job] Error in check-and-trigger worker:', err);
+        logError('jobs', '[Briefing Scheduler Job] Error in check-and-trigger worker', {
+          error: err instanceof Error ? err.message : String(err)
+        });
         throw err;
       }
     }
@@ -127,7 +136,9 @@ const worker = new Worker(
 );
 
 worker.on('error', (err) => {
-  console.error('Briefing scheduler worker crashed:', err);
+  logError('jobs', 'Briefing scheduler worker crashed', {
+    error: err instanceof Error ? err.message : String(err)
+  });
 });
 
 /**
@@ -150,8 +161,10 @@ export async function setupBriefingJob(): Promise<void> {
         }
       }
     );
-    console.log('Repeatable briefing scheduler check job successfully scheduled (every 5 minutes).');
+    logInfo('jobs', 'Repeatable briefing scheduler check job successfully scheduled (every 5 minutes).');
   } catch (error) {
-    console.error('Failed to schedule repeatable briefing scheduler job:', error);
+    logError('jobs', 'Failed to schedule repeatable briefing scheduler job', {
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 }

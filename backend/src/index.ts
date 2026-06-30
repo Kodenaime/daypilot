@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import { rateLimiter } from './middleware/rateLimiter';
 import dotenv from 'dotenv';
 import { checkDatabaseConnection } from './config/db';
 import { runMigrations } from './migrations/runner';
@@ -20,28 +20,24 @@ import './jobs/reminderQueue';
 import './services/fcmService';
 import './services/emailService';
 
+import { logInfo, logError } from './utils/logger';
+
 // Load environment variables
 dotenv.config();
 
 const app = express();
-app.use(express.json());
-app.use('/auth', authRouter); // Mount Google OAuth routes
-app.use('/sync', syncRouter); // Mount Google Calendar Sync routes
-
 const PORT = process.env.PORT || 3000;
+app.use(express.json());
 
 // Security Middlewares
 app.use(helmet());
 
-// Basic Rate Limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
+// Public and authenticated rate limiter (100 req/min limit, per user if logged in, falling back to IP)
+app.use(rateLimiter);
 
+// Mount routes
+app.use('/auth', authRouter); // Mount Google OAuth routes
+app.use('/sync', syncRouter); // Mount Google Calendar Sync routes
 app.use('/tasks', tasksRouter); // Mount Tasks CRUD routes
 app.use('/templates', templatesRouter); // Mount Templates CRUD routes
 app.use('/admin', adminRouter); // Mount Admin routes
@@ -70,7 +66,7 @@ app.get('/auth/test-protected', authMiddleware, (req: Request, res: Response) =>
 
 // Startup sequence
 async function startServer() {
-  console.log('Initializing DayPilot Backend...');
+  logInfo('startup', 'Initializing DayPilot Backend...');
 
   // Database Connection Check with Retries (especially useful for Docker Compose startup)
   let dbConnected = false;
@@ -83,13 +79,13 @@ async function startServer() {
       break;
     }
     if (attempt < maxRetries) {
-      console.log(`Database not ready yet. Retrying in ${retryIntervalMs / 1000}s (attempt ${attempt}/${maxRetries})...`);
+      logInfo('startup', `Database not ready yet. Retrying in ${retryIntervalMs / 1000}s (attempt ${attempt}/${maxRetries})...`, { attempt, maxRetries });
       await new Promise((resolve) => setTimeout(resolve, retryIntervalMs));
     }
   }
 
   if (dbConnected) {
-    console.log('Database connected successfully.');
+    logInfo('startup', 'Database connected successfully.');
     try {
       await runMigrations();
       // Initialize Background Scheduled Jobs
@@ -97,16 +93,33 @@ async function startServer() {
       await setupInstanceGenerationJob();
       await setupBriefingJob();
     } catch (err) {
-      console.error('Failed to initialize server dependencies or migrations:', err);
+      logError('startup', 'Failed to initialize server dependencies or migrations', { error: err instanceof Error ? err.message : String(err) });
     }
   } else {
-    console.error('Database connection failed after retries. Continuing server startup for health check liveness...');
+    logError('startup', 'Database connection failed after retries. Continuing server startup for health check liveness...');
   }
 
   app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    logInfo('startup', `Server is running on port ${PORT}`, { port: PORT });
   });
 }
 
 startServer();
+
+// Top-level unhandled exception and rejection handlers
+process.on('uncaughtException', (err) => {
+  logError('process', 'Uncaught Exception detected, exiting process', {
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined
+  });
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logError('process', 'Unhandled Rejection detected, exiting process', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined
+  });
+  process.exit(1);
+});
 

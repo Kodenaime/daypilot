@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { withTimeout } from '../utils/withTimeout';
+import { logInfo, logError } from '../utils/logger';
 
 dotenv.config();
 
@@ -38,14 +39,19 @@ export async function sendReminderEmail(
     const data: any = await response.json();
 
     if (!response.ok) {
-      console.error('Resend API returned an error status:', response.status, data);
+      logError('email', 'Resend API returned an error status', {
+        status: response.status,
+        data
+      });
       return { success: false, error: data?.message || `HTTP error ${response.status}` };
     }
 
-    console.log('Successfully sent email via Resend:', data.id);
+    logInfo('email', 'Successfully sent email via Resend', { emailId: data.id });
     return { success: true };
   } catch (error: any) {
-    console.error('Resend email send failed:', error);
+    logError('email', 'Resend email send failed', {
+      error: error.message || String(error)
+    });
     return { success: false, error: error.message || String(error) };
   }
 }

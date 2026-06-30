@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pool } from '../config/db';
+import { logInfo, logError } from '../utils/logger';
 
 export async function runMigrations(): Promise<void> {
   const client = await pool.connect();
@@ -20,7 +21,7 @@ export async function runMigrations(): Promise<void> {
     // Check if already applied
     const res = await client.query('SELECT 1 FROM migrations WHERE name = $1', [migrationName]);
     if (res.rowCount && res.rowCount > 0) {
-      console.log(`Migration ${migrationName} is already applied.`);
+      logInfo('migrations', `Migration ${migrationName} is already applied.`, { migrationName });
       return;
     }
 
@@ -35,7 +36,7 @@ export async function runMigrations(): Promise<void> {
       throw new Error(`Migration file not found at: ${sqlPath}`);
     }
 
-    console.log(`Running migration: ${migrationName}...`);
+    logInfo('migrations', `Running migration: ${migrationName}...`, { migrationName });
     const sql = fs.readFileSync(sqlPath, 'utf8');
 
     // 4. Run migration in a transaction
@@ -44,10 +45,13 @@ export async function runMigrations(): Promise<void> {
     await client.query('INSERT INTO migrations (name) VALUES ($1)', [migrationName]);
     await client.query('COMMIT');
     
-    console.log(`Migration ${migrationName} applied successfully.`);
+    logInfo('migrations', `Migration ${migrationName} applied successfully.`, { migrationName });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Migration failed, rolled back changes:', error);
+    logError('migrations', 'Migration failed, rolled back changes', {
+      migrationName: '001_initial_schema.sql',
+      error: error instanceof Error ? error.message : String(error)
+    });
     throw error;
   } finally {
     client.release();
