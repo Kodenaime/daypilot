@@ -1,4 +1,5 @@
 import { pool } from '../config/db';
+import { withTimeout } from '../utils/withTimeout';
 
 export interface CreateTaskData {
   title: string;
@@ -172,4 +173,36 @@ export async function getOverdueTasks(userId: string, maxDaysOverdue?: number): 
 
   const res = await pool.query(query, params);
   return res.rows;
+}
+
+/**
+ * Retrieves the single most urgent pending task for focus mode.
+ * - Prioritizes overdue tasks (oldest first).
+ * - Otherwise retrieves the soonest upcoming task.
+ * - Otherwise returns null.
+ * - Excludes tasks with null deadlines.
+ */
+export async function getNextFocusTask(userId: string): Promise<Task | null> {
+  const query = `
+    SELECT * FROM tasks
+    WHERE user_id = $1
+      AND status = 'pending'
+      AND deadline_at IS NOT NULL
+    ORDER BY
+      CASE WHEN deadline_at < NOW() THEN 0 ELSE 1 END ASC,
+      deadline_at ASC
+    LIMIT 1
+  `;
+  
+  // Wrap db query in withTimeout (5-second default limit is standard in the codebase)
+  const res = await withTimeout(
+    pool.query(query, [userId]),
+    5000,
+    'Database query timeout in getNextFocusTask'
+  );
+  
+  if (res.rowCount === 0) {
+    return null;
+  }
+  return res.rows[0];
 }

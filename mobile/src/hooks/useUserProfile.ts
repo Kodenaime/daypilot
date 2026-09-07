@@ -7,6 +7,7 @@ export interface UserProfile {
   push_enabled: boolean;
   email_enabled: boolean;
   sync_status: 'healthy' | 'token_expired' | 'sync_error' | 'disconnected';
+  briefing_time?: string;
 }
 
 export function useUserProfile() {
@@ -20,6 +21,7 @@ interface UpdateUserProfileVariables {
   briefing_enabled?: boolean;
   push_enabled?: boolean;
   email_enabled?: boolean;
+  briefingTime?: string;
 }
 
 export function useUpdateUserProfile() {

@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
+import { pool } from '../config/db';
 import {
   createStandaloneTask,
-  getTasksForUser,
   getTaskById,
   patchTask,
   deleteTask,
-  getOverdueTasks
+  getOverdueTasks,
+  getNextFocusTask
 } from '../services/taskService';
 import { createRemindersForTask, cancelPendingRemindersForTask } from '../services/reminderService';
 
@@ -66,7 +67,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-// GET /tasks - Get all tasks for user (ordered by deadline, optional status filter)
+// GET /tasks - Get all tasks for user (ordered by deadline, optional status filter, search, and pagination)
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   const userId = req.userId;
   if (!userId) {
@@ -74,22 +75,93 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
     return;
   }
 
-  const { status } = req.query;
-  let statusFilter: 'pending' | 'completed' | undefined = undefined;
+  const { status, search, page, limit } = req.query;
+  const isPaginated = page !== undefined || limit !== undefined || search !== undefined;
 
+  let query = `SELECT * FROM tasks WHERE user_id = $1`;
+  let countQuery = `SELECT COUNT(*) FROM tasks WHERE user_id = $1`;
+  const params: any[] = [userId];
+  let paramIdx = 2;
+
+  // Status Filter
   if (status === 'pending' || status === 'completed') {
-    statusFilter = status;
+    query += ` AND status = $${paramIdx}`;
+    countQuery += ` AND status = $${paramIdx}`;
+    params.push(status);
+    paramIdx++;
+  } else if (status === 'overdue') {
+    query += ` AND status = 'pending' AND deadline_at IS NOT NULL AND deadline_at < NOW()`;
+    countQuery += ` AND status = 'pending' AND deadline_at IS NOT NULL AND deadline_at < NOW()`;
   } else if (status !== undefined) {
-    res.status(400).json({ error: "Validation Error: status query param must be 'pending' or 'completed'." });
+    res.status(400).json({ error: "Validation Error: status query param must be 'pending', 'completed', or 'overdue'." });
     return;
   }
 
-  try {
-    const tasks = await getTasksForUser(userId, statusFilter);
-    res.status(200).json(tasks);
-  } catch (error) {
-    console.error('Error in GET /tasks:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+  // Search Filter
+  if (search && typeof search === 'string') {
+    query += ` AND title ILIKE $${paramIdx}`;
+    countQuery += ` AND title ILIKE $${paramIdx}`;
+    params.push(`%${search}%`);
+    paramIdx++;
+  }
+
+  if (isPaginated) {
+    // Determine page and limit
+    let limitVal = 20;
+    if (limit !== undefined) {
+      const parsedLimit = Number(limit);
+      if (!Number.isNaN(parsedLimit) && parsedLimit > 0) {
+        limitVal = Math.min(parsedLimit, 100);
+      }
+    }
+
+    let pageVal = 1;
+    if (page !== undefined) {
+      const parsedPage = Number(page);
+      if (!Number.isNaN(parsedPage) && parsedPage > 0) {
+        pageVal = parsedPage;
+      }
+    }
+
+    const offset = (pageVal - 1) * limitVal;
+
+    // Sorting: order by deadline_at descending, nulls last (since it's a search view)
+    const paginatedQuery = `${query} ORDER BY deadline_at DESC NULLS LAST LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+    const queryParams = [...params, limitVal, offset];
+
+    try {
+      const totalRes = await pool.query(countQuery, params);
+      const totalCount = parseInt(totalRes.rows[0].count, 10);
+
+      const tasksRes = await pool.query(paginatedQuery, queryParams);
+      const tasks = tasksRes.rows;
+
+      const hasMore = offset + tasks.length < totalCount;
+
+      res.status(200).json({
+        tasks,
+        pagination: {
+          total: totalCount,
+          page: pageVal,
+          limit: limitVal,
+          hasMore
+        }
+      });
+    } catch (error) {
+      console.error('Error in paginated GET /tasks:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  } else {
+    // Legacy behavior
+    // Sort by deadline_at ascending, nulls last (same as legacy getTasksForUser)
+    query += ` ORDER BY deadline_at ASC NULLS LAST`;
+    try {
+      const tasksRes = await pool.query(query, params);
+      res.status(200).json(tasksRes.rows);
+    } catch (error) {
+      console.error('Error in legacy GET /tasks:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
   }
 });
 
@@ -118,6 +190,23 @@ router.get('/overdue', authMiddleware, async (req: Request, res: Response) => {
     res.status(200).json(overdueTasks);
   } catch (error) {
     console.error('Error in GET /tasks/overdue:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /tasks/next - Get the single most urgent focus task
+router.get('/next', authMiddleware, async (req: Request, res: Response) => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized: User ID context missing.' });
+    return;
+  }
+
+  try {
+    const task = await getNextFocusTask(userId);
+    res.status(200).json({ task });
+  } catch (error) {
+    console.error('Error in GET /tasks/next:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

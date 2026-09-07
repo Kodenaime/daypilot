@@ -39,10 +39,10 @@ const QUEUE_NAME = 'briefing-scheduler';
 export const briefingSchedulerQueue = new Queue(QUEUE_NAME, { connection });
 
 /**
- * Checks if the current time in the given timezone is 5:55 AM.
- * We match 5:55 AM to 5:59 AM to catch any 5-minute interval trigger window.
+ * Checks if the current time in the given timezone matches the user's custom briefingTime.
+ * We match the custom briefingTime to up to 4 minutes after it to catch any 5-minute interval trigger window.
  */
-export function isBriefingTriggerTime(timezone: string, now: Date): { matches: boolean; localDateStr: string } {
+export function isBriefingTriggerTime(timezone: string, now: Date, briefingTime: string = '05:55'): { matches: boolean; localDateStr: string } {
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
@@ -68,8 +68,19 @@ export function isBriefingTriggerTime(timezone: string, now: Date): { matches: b
     const minute = parseInt(minutePart.value, 10);
     const localDateStr = `${yearPart.value}-${monthPart.value}-${dayPart.value}`;
 
-    // Target is exactly 5:55 AM (or within the 5:55 to 5:59 AM 5-minute bucket)
-    const matches = hour === 5 && minute >= 55 && minute <= 59;
+    // Parse custom briefingTime (HH:MM)
+    const [tHourStr, tMinuteStr] = briefingTime.split(':');
+    const tHour = parseInt(tHourStr, 10);
+    const tMinute = parseInt(tMinuteStr, 10);
+    const targetMinutes = tHour * 60 + tMinute;
+
+    const currentMinutes = hour * 60 + minute;
+    let diff = currentMinutes - targetMinutes;
+    if (diff < 0) {
+      diff += 1440;
+    }
+
+    const matches = diff >= 0 && diff < 5;
     return { matches, localDateStr };
   } catch (error) {
     logWarn('jobs', `Timezone lookup failed for briefing trigger calculation: "${timezone}"`, {
@@ -89,7 +100,7 @@ const worker = new Worker(
       const now = new Date();
 
       try {
-        const usersRes = await pool.query('SELECT id, device_timezone, briefing_enabled FROM users');
+        const usersRes = await pool.query('SELECT id, device_timezone, briefing_enabled, briefing_time FROM users');
         const users = usersRes.rows;
 
         for (const user of users) {
@@ -99,8 +110,11 @@ const worker = new Worker(
             continue;
           }
           const timezone = user.device_timezone || 'UTC';
+          const userBriefingTime = user.briefing_time && typeof user.briefing_time === 'string'
+            ? user.briefing_time.substring(0, 5)
+            : '05:55';
 
-          const { matches, localDateStr } = isBriefingTriggerTime(timezone, now);
+          const { matches, localDateStr } = isBriefingTriggerTime(timezone, now, userBriefingTime);
           if (matches) {
             const safeguardKey = `briefing:sent:${userId}:${localDateStr}`;
 
@@ -114,7 +128,11 @@ const worker = new Worker(
             // Set the safeguard key with an 24 hour expiry to prevent double trigger
             await redisClient.set(safeguardKey, '1', 'EX', 24 * 60 * 60);
 
-            logInfo('jobs', `[Briefing Scheduler Job] Local time is 5:55 AM (or within 5:55-5:59 AM range) in timezone "${timezone}" for user ${userId}. Triggering pipeline...`, { userId, timezone });
+            logInfo('jobs', `[Briefing Scheduler Job] Triggering briefing pipeline for user ${userId} in timezone "${timezone}" using scheduled time ${userBriefingTime}`, {
+              userId,
+              timezone,
+              briefingTime: userBriefingTime
+            });
             // Run briefing pipeline in background context safely
             runBriefingPipeline(userId).catch((err) => {
               logError('jobs', `[Briefing Scheduler Job] Error running briefing pipeline for user ${userId}`, {

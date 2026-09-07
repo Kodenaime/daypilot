@@ -17,7 +17,7 @@ export interface BriefingPipelineResult {
 /**
  * Checks if the given date/time is at or after 6:30 AM in the specified timezone.
  */
-export function isAfterCutoff(timezone: string, now: Date): boolean {
+export function isAfterCutoff(timezone: string, now: Date, briefingTime: string = '05:55'): boolean {
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
@@ -32,10 +32,18 @@ export function isAfterCutoff(timezone: string, now: Date): boolean {
     const hour = parseInt(hourPart.value, 10);
     const minute = parseInt(minutePart.value, 10);
 
-    // Cutoff is 6:30 AM
-    if (hour > 6) return true;
-    if (hour === 6 && minute >= 30) return true;
-    return false;
+    const [tHourStr, tMinuteStr] = briefingTime.split(':');
+    const tHour = parseInt(tHourStr, 10);
+    const tMinute = parseInt(tMinuteStr, 10);
+    const triggerMinutes = tHour * 60 + tMinute;
+
+    const currentMinutes = hour * 60 + minute;
+    let elapsed = currentMinutes - triggerMinutes;
+    if (elapsed < 0) {
+      elapsed += 1440;
+    }
+
+    return elapsed >= 35;
   } catch (error) {
     console.warn(`Timezone calculation failed for "${timezone}". Skipping cutoff check.`, error);
     return false;
@@ -72,10 +80,9 @@ export async function runBriefingPipeline(
 ): Promise<BriefingPipelineResult> {
   const retryDelayMs = options?.retryDelayMs ?? 60000;
 
-  // 1. Fetch user's details (device_timezone, email, fcm_token)
-  // 1. Fetch user's details (device_timezone, email, fcm_token, preferences)
+  // 1. Fetch user's details (device_timezone, email, fcm_token, preferences, briefing_time)
   const userRes = await pool.query(
-    'SELECT email, device_timezone, fcm_token, briefing_enabled, push_enabled, email_enabled FROM users WHERE id = $1',
+    'SELECT email, device_timezone, fcm_token, briefing_enabled, push_enabled, email_enabled, briefing_time FROM users WHERE id = $1',
     [userId]
   );
   if (userRes.rowCount === 0) {
@@ -90,6 +97,9 @@ export async function runBriefingPipeline(
   const deviceTimezone = user.device_timezone || 'UTC';
   const email = user.email;
   const fcmToken = user.fcm_token;
+  const userBriefingTime = user.briefing_time && typeof user.briefing_time === 'string'
+    ? user.briefing_time.substring(0, 5)
+    : '05:55';
 
   let outcome: 'success' | 'fallback' = 'fallback';
   let briefingData: { todayTasks: Task[]; overdueTasks: Task[] } | undefined;
@@ -108,8 +118,8 @@ export async function runBriefingPipeline(
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const activeNow = options?.mockDate ?? new Date();
 
-      // Check 6:30 AM abandonment constraint
-      if (isAfterCutoff(deviceTimezone, activeNow)) {
+      // Check dynamic 35-minute relative abandonment constraint
+      if (isAfterCutoff(deviceTimezone, activeNow, userBriefingTime)) {
         console.warn(`[Briefing Orchestrator] Abandonment cutoff reached (current time is at or after 6:30 AM in ${deviceTimezone}). Stopping retries and triggering fallback.`);
         outcome = 'fallback';
         break;

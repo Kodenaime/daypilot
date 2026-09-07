@@ -6,18 +6,26 @@ import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import messaging from '@react-native-firebase/messaging';
+let messaging: any = null;
+try {
+  messaging = require('@react-native-firebase/messaging').default;
+} catch (e) {
+  console.log('[RootNavigator] React Native Firebase messaging not available in this environment.');
+}
 
 import { DisplayText, HeadingText, BodyText, CaptionText } from '../components/Typography';
 import { BASE_URL, apiFetch } from '../api/client';
 import { useTodayTasks, Task } from '../hooks/useTodayTasks';
 import { TaskCard } from '../components/TaskCard';
+import { FocusWidget } from '../components/FocusWidget';
 import { useTaskDetail, useUpdateTask, useDeleteTask } from '../hooks/useTaskDetail';
 import { useCreateTask } from '../hooks/useCreateTask';
 import { useCreateTemplate } from '../hooks/useCreateTemplate';
 import { useTemplates, useTemplateDetail, useUpdateTemplate, useDeactivateTemplate } from '../hooks/useTemplates';
 import { useOverdueTasks } from '../hooks/useOverdueTasks';
 import { useUserProfile, useUpdateUserProfile } from '../hooks/useUserProfile';
+import { useAllTasks } from '../hooks/useAllTasks';
+import { useNextFocusTask } from '../hooks/useNextFocusTask';
 
 // ----------------------------------------------------
 // Placeholder Screens
@@ -80,7 +88,6 @@ function GoogleSignInScreen({ navigation, route }: any) {
     if (token) {
       try {
         await SecureStore.setItemAsync('user_jwt_token', token as string);
-        setAuth?.(true); // Transition state to Authenticated
         navigation.navigate('CalendarPermission');
       } catch (err) {
         console.error('Failed to securely store token:', err);
@@ -154,13 +161,66 @@ function GoogleSignInScreen({ navigation, route }: any) {
 }
 
 function CalendarPermissionScreen({ navigation, route }: any) {
-  // Use route.params to toggle the auth state
   const { setAuth } = route.params || {};
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      await apiFetch('/sync/initial', {
+        method: 'POST'
+      });
+      console.log('[Calendar Sync] Initial sync completed successfully. Entering application.');
+      setAuth?.(true);
+    } catch (err: any) {
+      console.error('[Calendar Sync] Initial sync failed:', err);
+      setSyncError(err.message || 'Failed to complete initial calendar sync.');
+      setIsSyncing(false);
+    }
+  };
+
   return (
-    <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark p-md gap-md">
-      <HeadingText className="text-center">Calendar Permission & Initial Sync</HeadingText>
-      <BodyText className="text-center">Grant access to sync your events</BodyText>
-      <Button title="Simulate Sign-In (Go to App)" onPress={() => setAuth?.(true)} />
+    <View className="flex-1 justify-center items-center bg-background-light dark:bg-background-dark p-xl gap-xl">
+      <View className="items-center gap-md">
+        <View className="w-16 h-16 rounded-[20px] bg-primary-light dark:bg-primary-dark items-center justify-center shadow-lg">
+          <DisplayText className="text-white text-3xl">🗓️</DisplayText>
+        </View>
+        <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold text-center mt-sm">
+          Calendar Permission & Sync
+        </HeadingText>
+        <BodyText className="text-center text-textSecondary-light dark:text-textSecondary-dark px-md">
+          We need permission to sync events from your Google Calendar to build your daily timeline.
+        </BodyText>
+      </View>
+
+      <View className="w-full px-lg gap-md mt-md">
+        {isSyncing ? (
+          <View className="items-center gap-sm">
+            <ActivityIndicator size="small" color="#0066FF" />
+            <CaptionText className="text-textSecondary-light dark:text-textSecondary-dark">Syncing Google Calendar events...</CaptionText>
+          </View>
+        ) : (
+          <>
+            <Button
+              title="Sync Google Calendar"
+              onPress={handleSync}
+              color="#0066FF"
+            />
+            {syncError && (
+              <CaptionText className="text-accent-light dark:text-accent-dark text-center mt-xs">
+                {syncError}
+              </CaptionText>
+            )}
+            <TouchableOpacity onPress={() => setAuth?.(true)} className="mt-sm">
+              <CaptionText className="text-primary-light dark:text-primary-dark font-semibold text-center text-sm">
+                Skip & Go to App →
+              </CaptionText>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -169,6 +229,10 @@ function CalendarPermissionScreen({ navigation, route }: any) {
 function TodayScreen({ navigation }: any) {
   const { data: tasks, isLoading, error } = useTodayTasks();
   const { data: overdueTasks } = useOverdueTasks();
+  const { data: focusData } = useNextFocusTask();
+  
+  const focusTask = focusData?.task;
+  const focusTaskMutation = useUpdateTask(focusTask?.id || '');
 
   const overdueCount = overdueTasks?.length || 0;
 
@@ -188,12 +252,23 @@ function TodayScreen({ navigation }: any) {
     <View className="flex-1 bg-background-light dark:bg-background-dark px-md pt-lg">
       {/* Premium Date Header */}
       <View className="mb-md">
-        <CaptionText className="text-primary-light dark:text-primary-dark font-bold uppercase tracking-wider">
-          {todayDateString}
-        </CaptionText>
-        <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-3xl">
-          Today
-        </DisplayText>
+        <View className="flex-row justify-between items-start">
+          <View className="flex-1">
+            <CaptionText className="text-primary-light dark:text-textPrimary-dark font-bold uppercase tracking-wider">
+              {todayDateString}
+            </CaptionText>
+            <DisplayText className="text-textPrimary-light dark:text-textPrimary-dark font-extrabold text-3xl">
+              Today
+            </DisplayText>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('AllTasks')}
+            className="p-sm bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl"
+          >
+            <DisplayText className="text-lg">🔍</DisplayText>
+          </TouchableOpacity>
+        </View>
         
         {/* Sync Disclaimer */}
         <CaptionText className="text-text-secondary-light dark:text-text-secondary-dark mt-xs text-xs leading-5">
@@ -217,6 +292,13 @@ function TodayScreen({ navigation }: any) {
             View All →
           </CaptionText>
         </TouchableOpacity>
+      )}
+
+      {focusData && (
+        <FocusWidget
+          task={focusTask || null}
+          onComplete={() => focusTaskMutation.mutate({ status: 'completed' })}
+        />
       )}
 
       {isLoading ? (
@@ -771,6 +853,132 @@ function OverdueListScreen({ navigation }: any) {
   );
 }
 
+function AllTasksScreen({ navigation }: any) {
+  const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed' | 'overdue'>('all');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchText);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchText]);
+
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useAllTasks({ search: debouncedSearch, status: statusFilter });
+
+  const allTasks = data?.pages.flatMap((page) => page.tasks) || [];
+
+  return (
+    <View className="flex-1 bg-background-light dark:bg-background-dark px-md pt-lg">
+      {/* Header Row */}
+      <View className="flex-row justify-between items-center mb-md">
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <CaptionText className="text-primary-light dark:text-primary-dark font-semibold text-base">
+            ← Back
+          </CaptionText>
+        </TouchableOpacity>
+        <HeadingText className="font-bold text-textPrimary-light dark:text-textPrimary-dark">Search Tasks</HeadingText>
+        <View className="w-10" />
+      </View>
+
+      {/* Search Input Box */}
+      <View className="mb-md">
+        <TextInput
+          value={searchText}
+          onChangeText={setSearchText}
+          placeholder="Search task title..."
+          placeholderTextColor="#8E8E93"
+          className="bg-surface-light dark:bg-surface-dark text-textPrimary-light dark:text-textPrimary-dark border border-border-light dark:border-border-dark px-md py-sm rounded-xl text-base"
+        />
+      </View>
+
+      {/* Segmented/Filter Selector */}
+      <View className="flex-row gap-xs mb-md">
+        {(['all', 'pending', 'completed', 'overdue'] as const).map((s) => {
+          const isSelected = statusFilter === s;
+          const label = s.charAt(0).toUpperCase() + s.slice(1);
+          return (
+            <TouchableOpacity
+              key={s}
+              activeOpacity={0.8}
+              onPress={() => setStatusFilter(s)}
+              className={`flex-1 py-xs rounded-xl border items-center justify-center ${
+                isSelected
+                  ? 'bg-primary-light dark:bg-primary-dark border-primary-light dark:border-primary-dark'
+                  : 'border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark'
+              }`}
+            >
+              <CaptionText className={`font-bold ${isSelected ? 'text-white' : 'text-textSecondary-light dark:text-textSecondary-dark'} text-xs`}>
+                {label}
+              </CaptionText>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Dynamic Results List */}
+      {isLoading ? (
+        <View className="flex-1 justify-center items-center">
+          <ActivityIndicator size="small" color="#0066FF" />
+        </View>
+      ) : error ? (
+        <View className="flex-1 justify-center items-center">
+          <BodyText className="text-accent-light font-semibold">Error loading tasks</BodyText>
+        </View>
+      ) : (
+        <FlatList
+          data={allTasks}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TaskCard
+              task={item}
+              onPress={() => navigation.navigate('TaskDetail', { taskId: item.id })}
+            />
+          )}
+          ItemSeparatorComponent={() => <View className="h-4" />}
+          contentContainerStyle={{ paddingBottom: 40, flexGrow: 1 }}
+          showsVerticalScrollIndicator={false}
+          onEndReached={() => {
+            if (hasNextPage && !isFetchingNextPage) {
+              fetchNextPage();
+            }
+          }}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={() => {
+            if (isFetchingNextPage) {
+              return (
+                <View className="py-md justify-center items-center">
+                  <ActivityIndicator size="small" color="#0066FF" />
+                </View>
+              );
+            }
+            return null;
+          }}
+          ListEmptyComponent={() => (
+            <View className="flex-1 justify-center items-center p-lg gap-md mt-xl">
+              <DisplayText className="text-4xl text-center">🔍</DisplayText>
+              <HeadingText className="text-textPrimary-light dark:text-textPrimary-dark font-bold text-center mt-sm">
+                No matching tasks
+              </HeadingText>
+              <CaptionText className="text-center">
+                Try adjusting your search query or status filter.
+              </CaptionText>
+            </View>
+          )}
+        />
+      )}
+    </View>
+  );
+}
+
 function getOrdinalSuffix(day: number) {
   if (day > 3 && day < 21) return 'th';
   switch (day % 10) {
@@ -898,6 +1106,7 @@ function SettingsScreen({ route }: any) {
   const { data: profile, isLoading, error } = useUserProfile();
   const updateMutation = useUpdateUserProfile();
   const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
+  const [showPicker, setShowPicker] = useState(false);
 
   useEffect(() => {
     SecureStore.getItemAsync('theme_preference').then((val) => {
@@ -919,6 +1128,24 @@ function SettingsScreen({ route }: any) {
         Alert.alert('Error', err.message || 'Failed to update preferences');
       }
     });
+  };
+
+  const getBriefingTimeDate = (): Date => {
+    const d = new Date();
+    const timeStr = profile?.briefing_time || '05:55';
+    const [h, m] = timeStr.split(':').map(Number);
+    d.setHours(h, m, 0, 0);
+    return d;
+  };
+
+  const formatBriefingTime12h = (timeStr: string = '05:55'): string => {
+    const [hStr, mStr] = timeStr.split(':');
+    const h = parseInt(hStr, 10);
+    const m = parseInt(mStr, 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const displayHour = h % 12 === 0 ? 12 : h % 12;
+    const displayMinute = String(m).padStart(2, '0');
+    return `${displayHour}:${displayMinute} ${ampm}`;
   };
 
   if (isLoading) {
@@ -976,7 +1203,11 @@ function SettingsScreen({ route }: any) {
           <View className="flex-row justify-between items-center">
             <View className="flex-1 mr-sm">
               <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Daily Briefing</BodyText>
-              <CaptionText className="text-xs leading-4">Receive a summary of today's schedule at 5:55 AM local time.</CaptionText>
+              <CaptionText className="text-xs leading-4">
+                {profile?.briefing_enabled
+                  ? `Receive a summary of today's schedule at ${formatBriefingTime12h(profile?.briefing_time)}.`
+                  : "Receive a summary of today's schedule at 5:55 AM local time."}
+              </CaptionText>
             </View>
             <Switch
               value={profile?.briefing_enabled}
@@ -985,6 +1216,26 @@ function SettingsScreen({ route }: any) {
               thumbColor={Platform.OS === 'ios' ? undefined : '#f4f3f4'}
             />
           </View>
+
+          {profile?.briefing_enabled && (
+            <View className="flex-row justify-between items-center border-t border-border-light dark:border-border-dark pt-md">
+              <View className="flex-1 mr-sm">
+                <BodyText className="text-textPrimary-light dark:text-textPrimary-dark font-semibold">Briefing Time</BodyText>
+                <CaptionText className="text-xs leading-4">
+                  Briefing delivered at {formatBriefingTime12h(profile?.briefing_time)}
+                </CaptionText>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setShowPicker(true)}
+                className="bg-primary-light/10 dark:bg-primary-dark/20 px-md py-xs rounded-xl"
+              >
+                <BodyText className="text-primary-light dark:text-primary-dark font-bold text-sm">
+                  Choose Time
+                </BodyText>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View className="flex-row justify-between items-center border-t border-border-light dark:border-border-dark pt-md">
             <View className="flex-1 mr-sm">
@@ -1013,6 +1264,27 @@ function SettingsScreen({ route }: any) {
           </View>
         </View>
       </View>
+
+      {showPicker && (
+        <DateTimePicker
+          value={getBriefingTimeDate()}
+          mode="time"
+          display="default"
+          onChange={(event: any, selectedDate?: Date) => {
+            setShowPicker(false);
+            if (selectedDate) {
+              const hours = String(selectedDate.getHours()).padStart(2, '0');
+              const minutes = String(selectedDate.getMinutes()).padStart(2, '0');
+              const timeStr = `${hours}:${minutes}`;
+              updateMutation.mutate({ briefingTime: timeStr }, {
+                onError: (err) => {
+                  Alert.alert('Error', err.message || 'Failed to update briefing time');
+                }
+              });
+            }
+          }}
+        />
+      )}
 
       {/* Appearance Section */}
       <View className="mb-xl">
@@ -1656,6 +1928,7 @@ function TodayTabStack({ setAuth }: { setAuth: (val: boolean) => void }) {
       <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task Details' }} />
       <Stack.Screen name="CreateTask" component={CreateTaskScreen} options={{ title: 'New Task' }} />
       <Stack.Screen name="OverdueList" component={OverdueListScreen} options={{ title: 'Overdue List' }} />
+      <Stack.Screen name="AllTasks" component={AllTasksScreen} options={{ title: 'Search Tasks' }} />
     </Stack.Navigator>
   );
 }
@@ -1738,6 +2011,10 @@ export default function RootNavigator() {
     }
 
     async function setupFCM() {
+      if (!messaging) {
+        console.log('[FCM Setup] FCM messaging is not available (running in Expo Go / simulator). Skipping configuration.');
+        return;
+      }
       try {
         // Request Permission (standard FCM client setup)
         const authStatus = await messaging().requestPermission();
