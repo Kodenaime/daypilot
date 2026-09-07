@@ -1,12 +1,13 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+import { logWarn, logError } from '../utils/logger';
 
 dotenv.config();
 
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.warn('Warning: DATABASE_URL is not set in env. Database operations will fail.');
+  logWarn('database', 'Warning: DATABASE_URL is not set in env. Database operations will fail.');
 }
 
 export const pool = new Pool({
@@ -28,7 +29,7 @@ export async function checkDatabaseConnection(): Promise<boolean> {
     client.release();
     return true;
   } catch (error) {
-    console.error('Database connection ping failed:', error);
+    logError('database', 'Database connection ping failed', { error: error instanceof Error ? error.message : String(error) });
     return false;
   }
 }

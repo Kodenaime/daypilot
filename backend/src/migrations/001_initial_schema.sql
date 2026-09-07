@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recurrence_template_id UUID REFERENCES recurrence_templates(id) ON DELETE SET NULL,
-    google_event_id TEXT,
+    google_event_id TEXT UNIQUE,
     title TEXT NOT NULL,
     deadline_at TIMESTAMPTZ,
     timezone_snapshot TEXT NOT NULL,
